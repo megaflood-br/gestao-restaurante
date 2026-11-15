@@ -1,0 +1,81 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-brand-50: #fff3f0;
+  --color-brand-100: #ffe4de;
+  --color-brand-200: #ffc5b8;
+  --color-brand-300: #ffa18d;
+  --color-brand-400: #ff795c;
+  --color-brand-500: #ff4e2a;
+  --color-brand-600: #d93818;
+  --color-brand-700: #b82b0f;
+  --color-brand-800: #96230d;
+  --color-brand-900: #69190a;
+  --color-brand-950: #3d0d05;
+}
+
+@layer base {
+  :root {
+    --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, monospace;
+  }
+
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: #f7f7f9;
+    color: #111827;
+  }
+
+  html.dark body {
+    background-color: #0c0d11;
+    color: #f8fafc;
+  }
+}
+
+.font-mono-tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .thermal-receipt-80mm,
+  .thermal-receipt-80mm * {
+    visibility: visible;
+  }
+  .thermal-receipt-80mm {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 80mm;
+    padding: 4mm;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 11px;
+    line-height: 1.35;
+    border: none !important;
+  }
+}

@@ -1,0 +1,72 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getDeliveryStore } from '@/lib/server-store';
+import type { Courier, CourierStatus } from '@/types/delivery';
+
+export async function GET() {
+  const db = getDeliveryStore();
+  return NextResponse.json({ ok: true, couriers: db.couriers });
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = (await request.json()) as {
+      name: string;
+      phone: string;
+      vehicle: string;
+      plate: string;
+    };
+    const db = getDeliveryStore();
+
+    if (!body.name?.trim() || !body.phone?.trim()) {
+      return NextResponse.json(
+        { ok: false, error: 'Informe nome e telefone do entregador.' },
+        { status: 400 },
+      );
+    }
+
+    const courier: Courier = {
+      id: `cour-${Date.now()}`,
+      name: body.name.trim(),
+      phone: body.phone.trim(),
+      vehicle: body.vehicle?.trim() || 'Moto 160cc',
+      plate: body.plate?.trim().toUpperCase() || 'SEM-PLACA',
+      status: 'disponivel',
+      active: true,
+      deliveriesToday: 0,
+    };
+
+    db.couriers = [courier, ...db.couriers];
+    return NextResponse.json({ ok: true, courier }, { status: 201 });
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: 'Falha ao cadastrar entregador.' },
+      { status: 400 },
+    );
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const body = (await request.json()) as {
+      id: string;
+      updates: {
+        name?: string;
+        phone?: string;
+        vehicle?: string;
+        plate?: string;
+        status?: CourierStatus;
+        active?: boolean;
+      };
+    };
+    const db = getDeliveryStore();
+    db.couriers = db.couriers.map((c) =>
+      c.id === body.id ? { ...c, ...body.updates } : c,
+    );
+    return NextResponse.json({ ok: true, couriers: db.couriers });
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: 'Erro ao atualizar entregador.' },
+      { status: 400 },
+    );
+  }
+}
