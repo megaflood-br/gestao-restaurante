@@ -10,6 +10,7 @@ import {
   createEvolutionInstance,
   fetchEvolutionConnectionState,
   getEvolutionEnvConfig,
+  isPhoneOptedOut,
   sendEvolutionText,
   setEvolutionWebhook,
 } from '@/lib/evolution-client';
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest) {
         | 'update_config'
         | 'send_manual'
         | 'toggle_handoff'
+        | 'remove_opt_out'
         | 'send_recovery'
         | 'save_api_credentials'
         | 'test_openai'
@@ -67,6 +69,12 @@ export async function POST(request: NextRequest) {
       allowAiOrderCreation?: boolean;
       upsellEnabled?: boolean;
       humanHandoffEnabled?: boolean;
+      typingPresenceEnabled?: boolean;
+      typingMinDelayMs?: number;
+      typingMaxDelayMs?: number;
+      antiBanPacingMs?: number;
+      disableLinkPreview?: boolean;
+      optOutEnabled?: boolean;
       templates?: Partial<EvolutionTemplates>;
       phone?: string;
       customerName?: string;
@@ -312,6 +320,43 @@ export async function POST(request: NextRequest) {
       if (typeof body.humanHandoffEnabled === 'boolean') {
         db.store.evolution.humanHandoffEnabled = body.humanHandoffEnabled;
       }
+      if (typeof body.typingPresenceEnabled === 'boolean') {
+        db.store.evolution.typingPresenceEnabled = body.typingPresenceEnabled;
+      }
+      if (
+        typeof body.typingMinDelayMs === 'number' &&
+        Number.isFinite(body.typingMinDelayMs)
+      ) {
+        db.store.evolution.typingMinDelayMs = Math.max(
+          500,
+          Math.min(15000, Math.round(body.typingMinDelayMs)),
+        );
+      }
+      if (
+        typeof body.typingMaxDelayMs === 'number' &&
+        Number.isFinite(body.typingMaxDelayMs)
+      ) {
+        const minBound = db.store.evolution.typingMinDelayMs ?? 1800;
+        db.store.evolution.typingMaxDelayMs = Math.max(
+          minBound + 400,
+          Math.min(25000, Math.round(body.typingMaxDelayMs)),
+        );
+      }
+      if (
+        typeof body.antiBanPacingMs === 'number' &&
+        Number.isFinite(body.antiBanPacingMs)
+      ) {
+        db.store.evolution.antiBanPacingMs = Math.max(
+          0,
+          Math.min(30000, Math.round(body.antiBanPacingMs)),
+        );
+      }
+      if (typeof body.disableLinkPreview === 'boolean') {
+        db.store.evolution.disableLinkPreview = body.disableLinkPreview;
+      }
+      if (typeof body.optOutEnabled === 'boolean') {
+        db.store.evolution.optOutEnabled = body.optOutEnabled;
+      }
       if (body.templates) {
         db.store.evolution.templates = {
           ...db.store.evolution.templates,
@@ -349,11 +394,40 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    if (body.action === 'remove_opt_out') {
+      const cleanPhone = (body.phone ?? '').replace(/\D/g, '');
+      if (!cleanPhone) {
+        return NextResponse.json(
+          { ok: false, error: 'Telefone inválido.' },
+          { status: 400 },
+        );
+      }
+      const suffix = cleanPhone.slice(-8);
+      db.store.evolution.optOutPhones = (
+        db.store.evolution.optOutPhones ?? []
+      ).filter((p) => !p.replace(/\D/g, '').endsWith(suffix));
+      db.store.evolution.lastSyncAt = now;
+      return NextResponse.json({
+        ok: true,
+        evolution: db.store.evolution,
+      });
+    }
+
     if (body.action === 'send_recovery') {
       const cleanPhone = (body.phone ?? '').replace(/\D/g, '');
       if (!cleanPhone) {
         return NextResponse.json(
           { ok: false, error: 'Informe um telefone para recuperação.' },
+          { status: 400 },
+        );
+      }
+      if (isPhoneOptedOut(db.store.evolution, cleanPhone)) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              'Contato solicitou opt-out ("PARAR") e está protegido contra disparos.',
+          },
           { status: 400 },
         );
       }

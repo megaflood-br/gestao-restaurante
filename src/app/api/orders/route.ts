@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDeliveryStore } from '@/lib/server-store';
 import {
   getEvolutionEnvConfig,
+  isPhoneOptedOut,
   sendEvolutionText,
 } from '@/lib/evolution-client';
 import {
@@ -153,7 +154,10 @@ export async function POST(request: NextRequest) {
     db.orders = [newOrder, ...db.orders];
 
     let createdLog = null;
-    if (db.store.evolution.autoNotifyOnStatus) {
+    if (
+      db.store.evolution.autoNotifyOnStatus &&
+      !isPhoneOptedOut(db.store.evolution, newOrder.customerPhone)
+    ) {
       const msg = db.store.evolution.templates.pendente
         .replace('{cliente}', newOrder.customerName)
         .replace('{numero}', String(newOrder.orderNumber))
@@ -280,7 +284,8 @@ export async function PATCH(request: NextRequest) {
       let statusLog = null;
       if (
         db.store.evolution.autoNotifyOnStatus &&
-        body.status !== 'cancelado'
+        body.status !== 'cancelado' &&
+        !isPhoneOptedOut(db.store.evolution, order.customerPhone)
       ) {
         const templateKey = body.status;
         const rawTemplate = db.store.evolution.templates[templateKey];

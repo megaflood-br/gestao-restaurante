@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from 'react';
 import {
-  BarChart3,
   Bike,
   CheckCircle2,
   Plus,
@@ -23,6 +22,7 @@ import type {
 } from '@/types/delivery';
 
 interface CouriersReportsSectionProps {
+  mode?: 'entregadores' | 'desempenho';
   state: DeliveryStoreState;
   onAddCourier: (courier: Courier) => void;
   onUpdateCourier: (id: string, updates: Partial<Courier>) => void;
@@ -42,12 +42,13 @@ const PERIOD_LABEL: Record<ReportPeriod, string> = {
 };
 
 export function CouriersReportsSection({
+  mode = 'desempenho',
   state,
   onAddCourier,
   onUpdateCourier,
   onUpdateOrderStatus,
 }: CouriersReportsSectionProps) {
-  const [activeTab, setActiveTab] = useState<'relatorios' | 'entregadores'>('relatorios');
+  const activeTab = mode === 'entregadores' ? 'entregadores' : 'relatorios';
   const [period, setPeriod] = useState<ReportPeriod>('7dias');
 
   const [courierName, setCourierName] = useState('');
@@ -259,46 +260,15 @@ export function CouriersReportsSection({
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white text-balance">
-            Entregadores e Relatórios de Vendas
+            {mode === 'entregadores'
+              ? 'Entregadores e Rotas'
+              : 'Desempenho e Relatórios'}
           </h1>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            Acompanhe faturamento por período, desempenho dos canais e operação da frota de motoboys.
+            {mode === 'entregadores'
+              ? 'Gerencie a frota de motoboys, acompanhe pedidos em rota e controle os repasses do turno.'
+              : 'Acompanhe faturamento por período, ticket médio, desempenho por canal e pratos mais vendidos.'}
           </p>
-        </div>
-
-        <div
-          role="tablist"
-          aria-label="Alternar entre relatórios e entregadores"
-          className="inline-flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg self-start sm:self-auto"
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'relatorios'}
-            onClick={() => setActiveTab('relatorios')}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
-              activeTab === 'relatorios'
-                ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400'
-            }`}
-          >
-            <BarChart3 className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Relatórios de Vendas</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'entregadores'}
-            onClick={() => setActiveTab('entregadores')}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
-              activeTab === 'entregadores'
-                ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400'
-            }`}
-          >
-            <Bike className="w-3.5 h-3.5" aria-hidden="true" />
-            <span>Painel de Entregadores</span>
-          </button>
         </div>
       </div>
 

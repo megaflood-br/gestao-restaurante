@@ -1,11 +1,13 @@
 export type DeliveryModuleId =
-  | 'visao_base'
-  | 'cardapio_digital'
-  | 'gestor_pedidos'
-  | 'whatsapp_evolution'
-  | 'catalogo_cupons'
-  | 'estoque_ficha'
-  | 'entregadores_relatorios';
+  | 'pedidos'
+  | 'atendimento'
+  | 'entregadores'
+  | 'cardapio'
+  | 'promocoes'
+  | 'estoque'
+  | 'vitrine'
+  | 'desempenho'
+  | 'configuracoes';
 
 export type OrderStatus =
   | 'pendente'
@@ -58,6 +60,13 @@ export interface EvolutionConfig {
   upsellEnabled?: boolean;
   humanHandoffEnabled?: boolean;
   humanHandoffPhones?: string[];
+  typingPresenceEnabled?: boolean;
+  typingMinDelayMs?: number;
+  typingMaxDelayMs?: number;
+  antiBanPacingMs?: number;
+  disableLinkPreview?: boolean;
+  optOutEnabled?: boolean;
+  optOutPhones?: string[];
   templates: EvolutionTemplates;
 }
 
@@ -235,6 +244,7 @@ export interface WhatsappLog {
   engine?: 'openai' | 'assistente_local' | 'template';
   timestamp: string;
   orderNumber?: number;
+  delayMs?: number;
 }
 
 export interface WhatsappSessionMessage {

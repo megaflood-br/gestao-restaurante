@@ -1,0 +1,1674 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import {
+  Bot,
+  CheckCircle2,
+  Clock,
+  KeyRound,
+  Link2,
+  MessageSquare,
+  Power,
+  QrCode,
+  Save,
+  ShieldCheck,
+  Smartphone,
+  Sparkles,
+  Store,
+} from 'lucide-react';
+import { formatCurrencyBRL, formatTimeBR } from '@/lib/formatters';
+import type {
+  BotTone,
+  DeliveryStoreState,
+  EvolutionConfig,
+  EvolutionTemplates,
+  StoreSettings,
+} from '@/types/delivery';
+
+export type SettingsTabId = 'loja' | 'ia' | 'whatsapp' | 'apis';
+
+interface SettingsSectionProps {
+  state: DeliveryStoreState;
+  initialTab?: SettingsTabId;
+  onUpdateStore: (updates: Partial<StoreSettings>) => Promise<void>;
+  onToggleStoreOpen: () => Promise<void>;
+  onUpdateEvolution: (evolution: EvolutionConfig) => void;
+  onOpenChatInbox?: () => void;
+}
+
+const BRENDA_AVATAR_URL = '/images/avatar_brenda_atendente_1794784551375.jpg';
+
+const SETTINGS_TABS: Array<{
+  id: SettingsTabId;
+  label: string;
+  description: string;
+  icon: typeof Store;
+}> = [
+  {
+    id: 'loja',
+    label: 'Loja e Entrega',
+    description: 'Horários, endereço, taxas e frete grátis',
+    icon: Store,
+  },
+  {
+    id: 'ia',
+    label: 'Atendente Virtual IA',
+    description: 'Personalidade, tom de voz e regras de venda',
+    icon: Sparkles,
+  },
+  {
+    id: 'whatsapp',
+    label: 'WhatsApp & Anti-Ban',
+    description: 'QR Code, delay de digitação, opt-out e avisos',
+    icon: Smartphone,
+  },
+  {
+    id: 'apis',
+    label: 'Credenciais e APIs',
+    description: 'Chaves OpenAI e servidor Evolution API v2',
+    icon: KeyRound,
+  },
+];
+
+const TONE_OPTIONS: Array<{
+  id: BotTone;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: 'acolhedor',
+    label: 'Acolhedor',
+    description: 'Gentil, próximo e focado em hospitalidade.',
+  },
+  {
+    id: 'descontraido',
+    label: 'Descontraído',
+    description: 'Leve, simpático e animado na medida certa.',
+  },
+  {
+    id: 'objetivo',
+    label: 'Direto ao Ponto',
+    description: 'Respostas rápidas, curtas e objetivas.',
+  },
+];
+
+export function SettingsSection({
+  state,
+  initialTab = 'loja',
+  onUpdateStore,
+  onToggleStoreOpen,
+  onUpdateEvolution,
+  onOpenChatInbox,
+}: SettingsSectionProps) {
+  const { store } = state;
+  const { evolution } = store;
+
+  const [activeTab, setActiveTab] = useState<SettingsTabId>(initialTab);
+  const [avatarFailed, setAvatarFailed] = useState(false);
+  const [heroImgFailed, setHeroImgFailed] = useState(false);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
+
+  // Store settings state
+  const [name, setName] = useState(store.name);
+  const [segment, setSegment] = useState(store.segment);
+  const [description, setDescription] = useState(store.description);
+  const [openingHours, setOpeningHours] = useState(store.openingHours);
+  const [phone, setPhone] = useState(store.phone);
+  const [address, setAddress] = useState(store.address);
+  const [neighborhood, setNeighborhood] = useState(store.neighborhood);
+  const [deliveryFee, setDeliveryFee] = useState(String(store.deliveryFee));
+  const [freeDeliveryMin, setFreeDeliveryMin] = useState(
+    String(store.freeDeliveryMin),
+  );
+  const [estimatedMinutes, setEstimatedMinutes] = useState(
+    String(store.estimatedMinutes),
+  );
+  const [savingStore, setSavingStore] = useState(false);
+
+  // AI & Evolution config state
+  const [instanceName, setInstanceName] = useState(evolution.instanceName);
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(
+    evolution.autoReplyEnabled,
+  );
+  const [autoNotifyOnStatus, setAutoNotifyOnStatus] = useState(
+    evolution.autoNotifyOnStatus,
+  );
+  const [assistantName, setAssistantName] = useState(
+    evolution.assistantName || 'Brenda',
+  );
+  const [tone, setTone] = useState<BotTone>(evolution.tone || 'acolhedor');
+  const [customInstructions, setCustomInstructions] = useState(
+    evolution.customInstructions || '',
+  );
+  const [allowAiOrderCreation, setAllowAiOrderCreation] = useState(
+    evolution.allowAiOrderCreation !== false,
+  );
+  const [upsellEnabled, setUpsellEnabled] = useState(
+    evolution.upsellEnabled !== false,
+  );
+  const [humanHandoffEnabled, setHumanHandoffEnabled] = useState(
+    evolution.humanHandoffEnabled !== false,
+  );
+  const [typingPresenceEnabled, setTypingPresenceEnabled] = useState(
+    evolution.typingPresenceEnabled !== false,
+  );
+  const [typingMinDelayMs, setTypingMinDelayMs] = useState(
+    evolution.typingMinDelayMs ?? 1800,
+  );
+  const [typingMaxDelayMs, setTypingMaxDelayMs] = useState(
+    evolution.typingMaxDelayMs ?? 4800,
+  );
+  const [antiBanPacingMs, setAntiBanPacingMs] = useState(
+    evolution.antiBanPacingMs ?? 2200,
+  );
+  const [disableLinkPreview, setDisableLinkPreview] = useState(
+    evolution.disableLinkPreview !== false,
+  );
+  const [optOutEnabled, setOptOutEnabled] = useState(
+    evolution.optOutEnabled !== false,
+  );
+  const [templates, setTemplates] = useState<EvolutionTemplates>(
+    evolution.templates,
+  );
+
+  // API credentials state
+  const [envStatus, setEnvStatus] = useState({
+    evolutionConfigured: false,
+    evolutionApiUrl: '',
+    evolutionKeyPreview: '',
+    openAiConfigured: false,
+    openAiModel: 'gpt-4o-mini',
+    openAiKeyPreview: '',
+  });
+  const [evolutionApiUrlInput, setEvolutionApiUrlInput] = useState('');
+  const [evolutionApiKeyInput, setEvolutionApiKeyInput] = useState('');
+  const [openAiApiKeyInput, setOpenAiApiKeyInput] = useState('');
+  const [openAiModelInput, setOpenAiModelInput] = useState('gpt-4o-mini');
+
+  const [qrBase64, setQrBase64] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{
+    type: 'ok' | 'error';
+    message: string;
+  } | null>(null);
+
+  useEffect(() => {
+    setName(store.name);
+    setSegment(store.segment);
+    setDescription(store.description);
+    setOpeningHours(store.openingHours);
+    setPhone(store.phone);
+    setAddress(store.address);
+    setNeighborhood(store.neighborhood);
+    setDeliveryFee(String(store.deliveryFee));
+    setFreeDeliveryMin(String(store.freeDeliveryMin));
+    setEstimatedMinutes(String(store.estimatedMinutes));
+  }, [store]);
+
+  useEffect(() => {
+    setInstanceName(evolution.instanceName);
+    setAutoReplyEnabled(evolution.autoReplyEnabled);
+    setAutoNotifyOnStatus(evolution.autoNotifyOnStatus);
+    setAssistantName(evolution.assistantName || 'Brenda');
+    setTone(evolution.tone || 'acolhedor');
+    setCustomInstructions(evolution.customInstructions || '');
+    setAllowAiOrderCreation(evolution.allowAiOrderCreation !== false);
+    setUpsellEnabled(evolution.upsellEnabled !== false);
+    setHumanHandoffEnabled(evolution.humanHandoffEnabled !== false);
+    setTypingPresenceEnabled(evolution.typingPresenceEnabled !== false);
+    setTypingMinDelayMs(evolution.typingMinDelayMs ?? 1800);
+    setTypingMaxDelayMs(evolution.typingMaxDelayMs ?? 4800);
+    setAntiBanPacingMs(evolution.antiBanPacingMs ?? 2200);
+    setDisableLinkPreview(evolution.disableLinkPreview !== false);
+    setOptOutEnabled(evolution.optOutEnabled !== false);
+    setTemplates(evolution.templates);
+  }, [evolution]);
+
+  useEffect(() => {
+    fetch('/api/evolution/instance')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.envStatus) {
+          setEnvStatus(data.envStatus);
+          if (data.envStatus.evolutionApiUrl) {
+            setEvolutionApiUrlInput(data.envStatus.evolutionApiUrl);
+          }
+          if (data.envStatus.openAiModel) {
+            setOpenAiModelInput(data.envStatus.openAiModel);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSaveStore = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingStore(true);
+    setFeedback(null);
+    try {
+      await onUpdateStore({
+        name: name.trim() || store.name,
+        segment: segment.trim() || store.segment,
+        description: description.trim() || store.description,
+        openingHours: openingHours.trim(),
+        phone: phone.trim(),
+        address: address.trim(),
+        neighborhood: neighborhood.trim(),
+        deliveryFee: Math.max(0, Number(deliveryFee) || 0),
+        freeDeliveryMin: Math.max(0, Number(freeDeliveryMin) || 0),
+        estimatedMinutes: Math.max(5, Number(estimatedMinutes) || 30),
+      });
+      setFeedback({
+        type: 'ok',
+        message: 'Dados da loja e regras de entrega salvos com sucesso.',
+      });
+    } finally {
+      setSavingStore(false);
+    }
+  };
+
+  const handleSaveEvolutionConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusyAction('update_config');
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/evolution/instance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update_config',
+          instanceName,
+          autoReplyEnabled,
+          autoNotifyOnStatus,
+          assistantName,
+          tone,
+          customInstructions,
+          allowAiOrderCreation,
+          upsellEnabled,
+          humanHandoffEnabled,
+          typingPresenceEnabled,
+          typingMinDelayMs,
+          typingMaxDelayMs,
+          antiBanPacingMs,
+          disableLinkPreview,
+          optOutEnabled,
+          templates,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        evolution?: EvolutionConfig;
+        error?: string;
+      };
+      if (data.ok && data.evolution) {
+        onUpdateEvolution(data.evolution);
+        setFeedback({
+          type: 'ok',
+          message: `Configurações da atendente ${assistantName || 'Brenda'}, WhatsApp e proteção anti-ban salvas.`,
+        });
+      } else {
+        setFeedback({
+          type: 'error',
+          message: data.error || 'Não foi possível salvar as configurações.',
+        });
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleInstanceAction = async (
+    action: 'connect' | 'simulate_scan' | 'disconnect' | 'configure_webhook',
+  ) => {
+    setBusyAction(action);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/evolution/instance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, instanceName }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        qrBase64?: string | null;
+        evolution?: EvolutionConfig;
+        webhookUrl?: string;
+        warning?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        setFeedback({
+          type: 'error',
+          message: data.error || 'Erro ao executar ação na Evolution API.',
+        });
+      } else {
+        if (data.qrBase64) setQrBase64(data.qrBase64);
+        if (action === 'simulate_scan' || action === 'disconnect') {
+          setQrBase64(null);
+        }
+        if (data.evolution) onUpdateEvolution(data.evolution);
+        if (data.webhookUrl) {
+          setFeedback({
+            type: 'ok',
+            message: `Webhook registrado em ${data.webhookUrl}`,
+          });
+        } else if (data.warning) {
+          setFeedback({ type: 'ok', message: data.warning });
+        } else if (action === 'simulate_scan') {
+          setFeedback({
+            type: 'ok',
+            message: 'Instância WhatsApp pareada e conectada.',
+          });
+        } else if (action === 'disconnect') {
+          setFeedback({
+            type: 'ok',
+            message: 'Instância desconectada.',
+          });
+        }
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleRemoveOptOut = async (targetPhone: string) => {
+    setBusyAction('remove_opt_out');
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/evolution/instance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove_opt_out', phone: targetPhone }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        evolution?: EvolutionConfig;
+      };
+      if (data.ok && data.evolution) {
+        onUpdateEvolution(data.evolution);
+        setFeedback({
+          type: 'ok',
+          message: `Número ${targetPhone} liberado da lista de opt-out.`,
+        });
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleSaveApiCredentials = async (
+    e?: React.FormEvent,
+    clearFlags?: { clearEvolutionKey?: boolean; clearOpenAiKey?: boolean },
+  ) => {
+    e?.preventDefault();
+    setBusyAction('save_api_credentials');
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/evolution/instance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save_api_credentials',
+          evolutionApiUrl: evolutionApiUrlInput,
+          evolutionApiKey: evolutionApiKeyInput,
+          openAiApiKey: openAiApiKeyInput,
+          openAiModel: openAiModelInput,
+          clearEvolutionKey: clearFlags?.clearEvolutionKey,
+          clearOpenAiKey: clearFlags?.clearOpenAiKey,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        envStatus?: typeof envStatus;
+        error?: string;
+      };
+      if (data.ok && data.envStatus) {
+        setEnvStatus(data.envStatus);
+        setEvolutionApiKeyInput('');
+        setOpenAiApiKeyInput('');
+        setFeedback({
+          type: 'ok',
+          message: 'Credenciais salvas com segurança no servidor do painel.',
+        });
+      } else {
+        setFeedback({
+          type: 'error',
+          message: data.error || 'Erro ao salvar credenciais.',
+        });
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleTestApiConnection = async (
+    target: 'test_openai' | 'test_evolution',
+  ) => {
+    setBusyAction(target);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/evolution/instance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: target }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        message?: string;
+        error?: string;
+      };
+      setFeedback({
+        type: data.ok ? 'ok' : 'error',
+        message: data.ok
+          ? data.message || 'Conexão validada.'
+          : data.error || 'Falha ao validar conexão.',
+      });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const statusText =
+    evolution.connectionStatus === 'conectado'
+      ? 'WhatsApp Conectado'
+      : evolution.connectionStatus === 'aguardando_qr'
+        ? 'Aguardando QR Code'
+        : evolution.connectionStatus === 'simulador'
+          ? 'Simulador Local Ativo'
+          : 'Desconectado';
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white text-balance">
+            Configurações do Sistema
+          </h1>
+          <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+            Centralize dados da loja, taxas de entrega, regras da atendente IA, proteção anti-ban e chaves de API em um só lugar.
+          </p>
+        </div>
+
+        {onOpenChatInbox && (
+          <button
+            type="button"
+            onClick={onOpenChatInbox}
+            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0 self-start sm:self-auto"
+          >
+            <MessageSquare className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+            <span>Ir para Atendimento IA</span>
+          </button>
+        )}
+      </div>
+
+      {feedback && (
+        <div
+          className={`px-4 py-3 rounded-xl border text-xs font-medium ${
+            feedback.type === 'ok'
+              ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+              : 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800 text-red-900 dark:text-red-200'
+          }`}
+        >
+          {feedback.message}
+        </div>
+      )}
+
+      {/* Unified Settings Layout: Left Rail + Active Panel */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Settings Navigation Rail */}
+        <aside className="lg:col-span-3 bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-2 flex lg:flex-col gap-1 overflow-x-auto">
+          {SETTINGS_TABS.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-start gap-3 px-3.5 py-3 rounded-lg text-left transition-colors shrink-0 lg:w-full ${
+                  active
+                    ? 'bg-brand-50 text-brand-900 dark:bg-brand-950/50 dark:text-brand-100'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Icon
+                  className={`w-4 h-4 mt-0.5 shrink-0 ${
+                    active ? 'text-brand-600 dark:text-brand-400' : ''
+                  }`}
+                  aria-hidden="true"
+                />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold whitespace-nowrap">{tab.label}</p>
+                  <p className="hidden lg:block mt-0.5 text-[11px] opacity-80 leading-snug">
+                    {tab.description}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
+        </aside>
+
+        {/* Active Configuration Content */}
+        <div className="lg:col-span-9 space-y-6">
+          {/* TAB 1: LOJA & ENTREGA */}
+          {activeTab === 'loja' && (
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+              <section className="xl:col-span-8 bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                      Perfil da Loja e Regras de Entrega
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Exibido no Cardápio Online e utilizado pela {assistantName || 'Brenda'} no WhatsApp.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={onToggleStoreOpen}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
+                      store.isOpen
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800'
+                        : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800'
+                    }`}
+                  >
+                    {store.isOpen ? 'Loja Aberta' : 'Loja Fechada'}
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveStore} className="p-6 space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label
+                        htmlFor="cfg-store-name"
+                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        Nome do Estabelecimento
+                      </label>
+                      <input
+                        id="cfg-store-name"
+                        required
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="cfg-store-segment"
+                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        Especialidade / Segmento
+                      </label>
+                      <input
+                        id="cfg-store-segment"
+                        value={segment}
+                        onChange={(e) => setSegment(e.target.value)}
+                        className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="cfg-store-desc"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      Descrição Curta da Vitrine
+                    </label>
+                    <textarea
+                      id="cfg-store-desc"
+                      rows={2}
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label
+                        htmlFor="cfg-store-hours"
+                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        Horário de Funcionamento
+                      </label>
+                      <input
+                        id="cfg-store-hours"
+                        value={openingHours}
+                        onChange={(e) => setOpeningHours(e.target.value)}
+                        className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="cfg-store-phone"
+                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        WhatsApp de Contato
+                      </label>
+                      <input
+                        id="cfg-store-phone"
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label
+                        htmlFor="cfg-store-address"
+                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        Endereço da Cozinha (Retirada)
+                      </label>
+                      <input
+                        id="cfg-store-address"
+                        value={address}
+                        onChange={(e) => setAddress(e.target.value)}
+                        className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="cfg-store-neighborhood"
+                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        Bairro / Cidade
+                      </label>
+                      <input
+                        id="cfg-store-neighborhood"
+                        value={neighborhood}
+                        onChange={(e) => setNeighborhood(e.target.value)}
+                        className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+                    <div>
+                      <label
+                        htmlFor="cfg-store-fee"
+                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        Taxa de Entrega (R$)
+                      </label>
+                      <input
+                        id="cfg-store-fee"
+                        type="number"
+                        step="0.5"
+                        min="0"
+                        value={deliveryFee}
+                        onChange={(e) => setDeliveryFee(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="cfg-store-free"
+                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        Frete Grátis a partir (R$)
+                      </label>
+                      <input
+                        id="cfg-store-free"
+                        type="number"
+                        step="1"
+                        min="0"
+                        value={freeDeliveryMin}
+                        onChange={(e) => setFreeDeliveryMin(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="cfg-store-eta"
+                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        Previsão Média (min)
+                      </label>
+                      <input
+                        id="cfg-store-eta"
+                        type="number"
+                        min="5"
+                        value={estimatedMinutes}
+                        onChange={(e) => setEstimatedMinutes(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={savingStore}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg disabled:opacity-60"
+                    >
+                      <Save className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>{savingStore ? 'Salvando...' : 'Salvar Dados da Loja'}</span>
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <aside className="xl:col-span-4 bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                <div className="aspect-video w-full bg-slate-100 dark:bg-slate-800 relative overflow-hidden">
+                  {heroImgFailed ? (
+                    <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 p-4 text-center">
+                      <Store className="w-8 h-8 mb-2" aria-hidden="true" />
+                      <span className="text-sm font-medium">{store.name}</span>
+                    </div>
+                  ) : (
+                    <img
+                      src={store.heroImage}
+                      alt={store.name}
+                      referrerPolicy="no-referrer"
+                      onError={() => setHeroImgFailed(true)}
+                      className="w-full h-full object-cover"
+                    />
+                  )}
+                </div>
+                <div className="p-5 space-y-3">
+                  <div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {store.segment} · {store.neighborhood}
+                    </p>
+                    <h3 className="mt-0.5 text-base font-bold text-slate-900 dark:text-white">
+                      {store.name}
+                    </h3>
+                  </div>
+                  <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-1.5 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Taxa padrão</span>
+                      <span className="font-mono-tabular font-semibold text-slate-900 dark:text-white">
+                        {formatCurrencyBRL(store.deliveryFee)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Frete grátis acima de</span>
+                      <span className="font-mono-tabular font-semibold text-emerald-700 dark:text-emerald-400">
+                        {formatCurrencyBRL(store.freeDeliveryMin)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Tempo médio</span>
+                      <span className="font-mono-tabular font-semibold text-slate-900 dark:text-white">
+                        {store.estimatedMinutes} min
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          )}
+
+          {/* TAB 2: ATENDENTE VIRTUAL IA (BRENDA) */}
+          {activeTab === 'ia' && (
+            <form
+              onSubmit={handleSaveEvolutionConfig}
+              className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-6"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-200 dark:border-slate-800">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-12 h-12 rounded-xl overflow-hidden bg-brand-50 dark:bg-brand-950/50 border border-slate-200 dark:border-slate-700 shrink-0 flex items-center justify-center">
+                    {avatarFailed ? (
+                      <Bot className="w-6 h-6 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                    ) : (
+                      <img
+                        src={BRENDA_AVATAR_URL}
+                        alt={`Atendente ${assistantName || 'Brenda'}`}
+                        referrerPolicy="no-referrer"
+                        onError={() => setAvatarFailed(true)}
+                        className="w-full h-full object-cover"
+                      />
+                    )}
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                      Personalidade e Regras da {assistantName || 'Brenda'}
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Motor: {envStatus.openAiConfigured ? `OpenAI (${envStatus.openAiModel})` : 'Assistente Local Conversacional (configure OpenAI na aba Credenciais)'}
+                    </p>
+                  </div>
+                </div>
+
+                {onOpenChatInbox && (
+                  <button
+                    type="button"
+                    onClick={onOpenChatInbox}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-950/50 border border-brand-200 dark:border-brand-800 rounded-lg whitespace-nowrap shrink-0 self-start sm:self-auto"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Testar Conversa Ao Vivo</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div>
+                  <label
+                    htmlFor="cfg-ai-name"
+                    className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                  >
+                    Nome da Atendente Virtual
+                  </label>
+                  <input
+                    id="cfg-ai-name"
+                    value={assistantName}
+                    onChange={(e) => setAssistantName(e.target.value)}
+                    placeholder="Ex.: Brenda"
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                  />
+                </div>
+
+                <div>
+                  <span className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Tom de Voz no WhatsApp
+                  </span>
+                  <div className="grid grid-cols-3 gap-2">
+                    {TONE_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setTone(opt.id)}
+                        className={`px-2.5 py-2 text-xs font-semibold rounded-lg border transition-colors ${
+                          tone === opt.id
+                            ? 'bg-brand-50 dark:bg-brand-950/50 border-brand-500 text-brand-700 dark:text-brand-300'
+                            : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="cfg-ai-instructions"
+                  className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                >
+                  Instruções Específicas do Restaurante
+                </label>
+                <textarea
+                  id="cfg-ai-instructions"
+                  rows={3}
+                  value={customInstructions}
+                  onChange={(e) => setCustomInstructions(e.target.value)}
+                  placeholder="Ex.: Responder de forma natural, só enviar o cardápio quando pedirem, sugerir Suco Natural de Laranja..."
+                  className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <label className="flex items-center justify-between gap-4 p-3.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg cursor-pointer">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                      Atendimento automático 24h
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Responde mensagens recebidas no webhook da Evolution API.
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={autoReplyEnabled}
+                    onChange={(e) => setAutoReplyEnabled(e.target.checked)}
+                    className="accent-brand-600 w-4 h-4 shrink-0"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between gap-4 p-3.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg cursor-pointer">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                      Fechar pedidos direto no chat
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Cria pedidos no Gestor e baixa insumos da Ficha Técnica.
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={allowAiOrderCreation}
+                    onChange={(e) => setAllowAiOrderCreation(e.target.checked)}
+                    className="accent-brand-600 w-4 h-4 shrink-0"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between gap-4 p-3.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg cursor-pointer">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                      Sugerir bebidas e extras (Upsell)
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Oferece acompanhamentos no momento certo para elevar o ticket.
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={upsellEnabled}
+                    onChange={(e) => setUpsellEnabled(e.target.checked)}
+                    className="accent-brand-600 w-4 h-4 shrink-0"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between gap-4 p-3.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg cursor-pointer">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                      Transbordo automático para humano
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      Pausa a IA quando o cliente pedir para falar com a equipe.
+                    </p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={humanHandoffEnabled}
+                    onChange={(e) => setHumanHandoffEnabled(e.target.checked)}
+                    className="accent-brand-600 w-4 h-4 shrink-0"
+                  />
+                </label>
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button
+                  type="submit"
+                  disabled={busyAction !== null}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg disabled:opacity-60"
+                >
+                  <Save className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>
+                    {busyAction === 'update_config'
+                      ? 'Salvando...'
+                      : 'Salvar Regras da Atendente'}
+                  </span>
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* TAB 3: WHATSAPP, ANTI-BAN & MENSAGENS AUTOMÁTICAS */}
+          {activeTab === 'whatsapp' && (
+            <div className="space-y-6">
+              {/* Connection Card */}
+              <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                      Conexão WhatsApp (Evolution API v2)
+                    </h2>
+                    <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                      Situação:{' '}
+                      <span
+                        className={`font-semibold ${
+                          evolution.connectionStatus === 'conectado'
+                            ? 'text-emerald-700 dark:text-emerald-400'
+                            : evolution.connectionStatus === 'desconectado'
+                              ? 'text-red-700 dark:text-red-400'
+                              : 'text-amber-700 dark:text-amber-400'
+                        }`}
+                      >
+                        {statusText}
+                      </span>
+                    </p>
+                  </div>
+                  <Smartphone className="w-5 h-5 text-slate-400 shrink-0" aria-hidden="true" />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label
+                      htmlFor="cfg-evo-instance"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      Nome da Instância
+                    </label>
+                    <input
+                      id="cfg-evo-instance"
+                      value={instanceName}
+                      onChange={(e) => setInstanceName(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="cfg-evo-webhook"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      Endpoint Webhook (MESSAGES_UPSERT)
+                    </label>
+                    <input
+                      id="cfg-evo-webhook"
+                      readOnly
+                      value={evolution.webhookUrl}
+                      className="w-full px-3 py-2 text-xs font-mono-tabular bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-600 dark:text-slate-400"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    disabled={busyAction !== null}
+                    onClick={() => handleInstanceAction('connect')}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg disabled:opacity-60"
+                  >
+                    <QrCode className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>
+                      {busyAction === 'connect' ? 'Gerando...' : 'Gerar QR Code / Conectar'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={busyAction !== null}
+                    onClick={() => handleInstanceAction('configure_webhook')}
+                    className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg"
+                  >
+                    <Link2 className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Registrar Webhook</span>
+                  </button>
+
+                  {evolution.connectionStatus === 'conectado' && (
+                    <button
+                      type="button"
+                      disabled={busyAction !== null}
+                      onClick={() => handleInstanceAction('disconnect')}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
+                    >
+                      <Power className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Desconectar</span>
+                    </button>
+                  )}
+                </div>
+
+                {evolution.connectionStatus === 'aguardando_qr' && (
+                  <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl flex flex-col sm:flex-row items-center gap-5">
+                    {qrBase64 ? (
+                      <img
+                        src={
+                          qrBase64.startsWith('data:')
+                            ? qrBase64
+                            : `data:image/png;base64,${qrBase64}`
+                        }
+                        alt="QR Code WhatsApp Evolution API"
+                        referrerPolicy="no-referrer"
+                        className="w-36 h-36 rounded-lg border border-slate-200 bg-white p-1"
+                      />
+                    ) : (
+                      <div className="w-36 h-36 rounded-lg border border-slate-200 dark:border-slate-700 bg-white p-3 flex flex-col items-center justify-center text-slate-900 shrink-0">
+                        <QrCode className="w-24 h-24" aria-hidden="true" />
+                        <span className="text-[10px] font-mono-tabular mt-1">
+                          {instanceName}
+                        </span>
+                      </div>
+                    )}
+                    <div className="space-y-2.5 text-xs">
+                      <p className="font-semibold text-slate-900 dark:text-white">
+                        Escaneie no WhatsApp → Aparelhos Conectados
+                      </p>
+                      <p className="text-slate-600 dark:text-slate-400 leading-relaxed">
+                        Com a Evolution API configurada na aba Credenciais, o QR Code real aparece aqui. Para validar localmente, conclua o pareamento simulado:
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => handleInstanceAction('simulate_scan')}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Simular Pareamento Concluído</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              {/* Anti-Ban + Templates Form */}
+              <form
+                onSubmit={handleSaveEvolutionConfig}
+                className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start"
+              >
+                <section className="xl:col-span-6 bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
+                  <div className="flex items-start gap-2.5">
+                    <ShieldCheck
+                      className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <div>
+                      <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                        Proteção Anti-Ban & Digitação Humana
+                      </h2>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                        Emite presença <code className="font-mono-tabular">composing</code>, varia o tempo de escrita conforme o texto, espaça disparos e bloqueia grupos e opt-out.
+                      </p>
+                    </div>
+                  </div>
+
+                  <label className="flex items-center justify-between gap-4 p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg cursor-pointer">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                        Simular &ldquo;digitando...&rdquo; antes de responder
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Chama <code className="font-mono-tabular">/chat/sendPresence</code> antes do envio.
+                      </p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={typingPresenceEnabled}
+                      onChange={(e) => setTypingPresenceEnabled(e.target.checked)}
+                      className="accent-brand-600 w-4 h-4 shrink-0"
+                    />
+                  </label>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label
+                        htmlFor="cfg-typing-min"
+                        className="block text-[11px] font-medium text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        Delay mínimo (ms)
+                      </label>
+                      <input
+                        id="cfg-typing-min"
+                        type="number"
+                        min={600}
+                        max={15000}
+                        step={200}
+                        value={typingMinDelayMs}
+                        onChange={(e) =>
+                          setTypingMinDelayMs(Math.max(600, Number(e.target.value) || 1800))
+                        }
+                        className="w-full px-3 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="cfg-typing-max"
+                        className="block text-[11px] font-medium text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        Delay máximo (ms)
+                      </label>
+                      <input
+                        id="cfg-typing-max"
+                        type="number"
+                        min={1200}
+                        max={25000}
+                        step={200}
+                        value={typingMaxDelayMs}
+                        onChange={(e) =>
+                          setTypingMaxDelayMs(Math.max(1200, Number(e.target.value) || 4800))
+                        }
+                        className="w-full px-3 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="cfg-antiban-pacing"
+                        className="block text-[11px] font-medium text-slate-700 dark:text-slate-300 mb-1"
+                      >
+                        Cadência anti-rajada (ms)
+                      </label>
+                      <input
+                        id="cfg-antiban-pacing"
+                        type="number"
+                        min={0}
+                        max={30000}
+                        step={200}
+                        value={antiBanPacingMs}
+                        onChange={(e) =>
+                          setAntiBanPacingMs(Math.max(0, Number(e.target.value) || 0))
+                        }
+                        className="w-full px-3 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </div>
+                  </div>
+
+                  <label className="flex items-center justify-between gap-4 p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg cursor-pointer">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                        Desativar pré-visualização de links (linkPreview: false)
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Reduz risco de filtro antispam ao enviar link do cardápio.
+                      </p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={disableLinkPreview}
+                      onChange={(e) => setDisableLinkPreview(e.target.checked)}
+                      className="accent-brand-600 w-4 h-4 shrink-0"
+                    />
+                  </label>
+
+                  <label className="flex items-center justify-between gap-4 p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg cursor-pointer">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                        Opt-out automático (&ldquo;PARAR&rdquo; / &ldquo;SAIR&rdquo;) + Filtro de grupos
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Bloqueia disparos para quem pedir saída e ignora grupos (@g.us).
+                      </p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={optOutEnabled}
+                      onChange={(e) => setOptOutEnabled(e.target.checked)}
+                      className="accent-brand-600 w-4 h-4 shrink-0"
+                    />
+                  </label>
+
+                  {(evolution.optOutPhones ?? []).length > 0 && (
+                    <div className="p-3 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg space-y-2">
+                      <p className="text-xs font-semibold text-amber-900 dark:text-amber-200">
+                        Contatos em Opt-Out ({evolution.optOutPhones?.length ?? 0})
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {(evolution.optOutPhones ?? []).map((optPhone) => (
+                          <div
+                            key={optPhone}
+                            className="inline-flex items-center gap-2 px-2.5 py-1 bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 rounded-md text-xs font-mono-tabular"
+                          >
+                            <span className="text-slate-800 dark:text-slate-200">
+                              {optPhone}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveOptOut(optPhone)}
+                              className="text-brand-600 dark:text-brand-400 font-sans font-semibold hover:underline"
+                            >
+                              Liberar
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </section>
+
+                <section className="xl:col-span-6 bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
+                  <div>
+                    <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                      Mensagens Automáticas por Status
+                    </h2>
+                    <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                      Variáveis: <code className="font-mono-tabular">{'{cliente}'}</code> ·{' '}
+                      <code className="font-mono-tabular">{'{numero}'}</code> ·{' '}
+                      <code className="font-mono-tabular">{'{total}'}</code> ·{' '}
+                      <code className="font-mono-tabular">{'{entregador}'}</code>
+                    </p>
+                  </div>
+
+                  <label className="flex items-center justify-between gap-4 p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg cursor-pointer">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                        Avisar cliente a cada atualização do pedido
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        Disparo automático ao aceitar, preparar, finalizar ou despachar.
+                      </p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={autoNotifyOnStatus}
+                      onChange={(e) => setAutoNotifyOnStatus(e.target.checked)}
+                      className="accent-brand-600 w-4 h-4 shrink-0"
+                    />
+                  </label>
+
+                  <div className="space-y-3">
+                    {(
+                      [
+                        { key: 'pendente', label: 'Pedido Recebido (Pendente)' },
+                        { key: 'preparo', label: 'Em Preparo na Cozinha' },
+                        { key: 'pronto', label: 'Pronto p/ Retirada ou Coleta' },
+                        { key: 'entrega', label: 'Saiu para Entrega' },
+                        { key: 'finalizado', label: 'Pedido Entregue' },
+                      ] as const
+                    ).map((field) => (
+                      <div key={field.key}>
+                        <label
+                          htmlFor={`cfg-tpl-${field.key}`}
+                          className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                        >
+                          {field.label}
+                        </label>
+                        <textarea
+                          id={`cfg-tpl-${field.key}`}
+                          rows={2}
+                          value={templates[field.key]}
+                          onChange={(e) =>
+                            setTemplates((prev) => ({
+                              ...prev,
+                              [field.key]: e.target.value,
+                            }))
+                          }
+                          className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="submit"
+                      disabled={busyAction !== null}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg disabled:opacity-60"
+                    >
+                      <Save className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>
+                        {busyAction === 'update_config'
+                          ? 'Salvando...'
+                          : 'Salvar Anti-Ban e Templates'}
+                      </span>
+                    </button>
+                  </div>
+                </section>
+              </form>
+
+              {/* Audit Logs */}
+              <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                    Auditoria de Eventos e Disparos WhatsApp
+                  </h2>
+                  <span className="text-xs font-mono-tabular text-slate-500">
+                    {state.whatsappLogs.length} registros
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-500 dark:text-slate-400">
+                        <th className="py-2.5 px-5">Hora</th>
+                        <th className="py-2.5 px-4">Cliente / Telefone</th>
+                        <th className="py-2.5 px-4">Evento</th>
+                        <th className="py-2.5 px-4">Mensagem</th>
+                        <th className="py-2.5 px-5 text-right">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
+                      {state.whatsappLogs.slice(0, 15).map((log) => (
+                        <tr
+                          key={log.id}
+                          className="hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                        >
+                          <td className="py-3 px-5 font-mono-tabular text-slate-500 whitespace-nowrap">
+                            {formatTimeBR(log.timestamp)}
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap">
+                            <div className="font-medium text-slate-900 dark:text-white">
+                              {log.customerName}
+                            </div>
+                            <div className="font-mono-tabular text-slate-500">
+                              {log.phone}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 font-mono-tabular text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                            <div>
+                              {log.direction === 'inbound' ? 'Entrada' : 'Saída'} ·{' '}
+                              {log.event}
+                            </div>
+                            {log.delayMs ? (
+                              <div className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-emerald-700 dark:text-emerald-400">
+                                <Clock className="w-3 h-3" aria-hidden="true" />
+                                <span>Digitação {(log.delayMs / 1000).toFixed(1)}s</span>
+                              </div>
+                            ) : null}
+                          </td>
+                          <td className="py-3 px-4 max-w-md text-slate-700 dark:text-slate-300">
+                            <p className="line-clamp-2">{log.message}</p>
+                          </td>
+                          <td className="py-3 px-5 text-right font-medium whitespace-nowrap">
+                            <span
+                              className={
+                                log.status === 'enviada' || log.status === 'recebida'
+                                  ? 'text-emerald-700 dark:text-emerald-400'
+                                  : log.status === 'erro'
+                                    ? 'text-red-700 dark:text-red-400'
+                                    : 'text-slate-600 dark:text-slate-400'
+                              }
+                            >
+                              {log.status === 'enviada'
+                                ? 'Enviada'
+                                : log.status === 'recebida'
+                                  ? 'Recebida'
+                                  : log.status === 'erro'
+                                    ? 'Erro'
+                                    : 'Simulada'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {/* TAB 4: CREDENCIAIS & APIS (OPENAI & EVOLUTION API) */}
+          {activeTab === 'apis' && (
+            <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <KeyRound className="w-4 h-4 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                    <span>Credenciais de APIs (OpenAI & Evolution API v2)</span>
+                  </h2>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    Configure suas chaves diretamente pelo painel administrativo. Elas ficam armazenadas apenas no servidor, sem precisar editar arquivos .env.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 text-xs shrink-0">
+                  <span
+                    className={`font-semibold ${
+                      envStatus.openAiConfigured
+                        ? 'text-emerald-700 dark:text-emerald-400'
+                        : 'text-slate-500'
+                    }`}
+                  >
+                    OpenAI: {envStatus.openAiConfigured ? 'Conectada' : 'Não configurada'}
+                  </span>
+                  <span className="text-slate-300 dark:text-slate-700">·</span>
+                  <span
+                    className={`font-semibold ${
+                      envStatus.evolutionConfigured
+                        ? 'text-emerald-700 dark:text-emerald-400'
+                        : 'text-slate-500'
+                    }`}
+                  >
+                    Evolution: {envStatus.evolutionConfigured ? 'Configurada' : 'Simulador'}
+                  </span>
+                </div>
+              </div>
+
+              <form
+                onSubmit={handleSaveApiCredentials}
+                className="grid grid-cols-1 lg:grid-cols-2 gap-6"
+              >
+                <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-xs font-bold text-slate-900 dark:text-white">
+                      OpenAI (Atendente {assistantName || 'Brenda'})
+                    </h3>
+                    {envStatus.openAiConfigured && (
+                      <span className="text-[11px] font-mono-tabular text-emerald-700 dark:text-emerald-400">
+                        Ativa: {envStatus.openAiKeyPreview}
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="cfg-openai-key"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      OpenAI API Key
+                    </label>
+                    <input
+                      id="cfg-openai-key"
+                      type="password"
+                      value={openAiApiKeyInput}
+                      onChange={(e) => setOpenAiApiKeyInput(e.target.value)}
+                      placeholder={
+                        envStatus.openAiConfigured
+                          ? `Salva (${envStatus.openAiKeyPreview}) — digite para substituir`
+                          : 'sk-proj-...'
+                      }
+                      className="w-full px-3 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="cfg-openai-model"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      Modelo OpenAI
+                    </label>
+                    <select
+                      id="cfg-openai-model"
+                      value={openAiModelInput}
+                      onChange={(e) => setOpenAiModelInput(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    >
+                      <option value="gpt-4o-mini">gpt-4o-mini (Rápido e econômico)</option>
+                      <option value="gpt-4o">gpt-4o (Máxima precisão)</option>
+                      <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                      <option value="gpt-4.1">gpt-4.1</option>
+                    </select>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={busyAction !== null}
+                      onClick={() => handleTestApiConnection('test_openai')}
+                      className="px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+                    >
+                      {busyAction === 'test_openai' ? 'Testando...' : 'Testar OpenAI'}
+                    </button>
+                    {envStatus.openAiConfigured && (
+                      <button
+                        type="button"
+                        disabled={busyAction !== null}
+                        onClick={() =>
+                          handleSaveApiCredentials(undefined, { clearOpenAiKey: true })
+                        }
+                        className="px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
+                      >
+                        Remover chave
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-xs font-bold text-slate-900 dark:text-white">
+                      Servidor Evolution API v2
+                    </h3>
+                    {envStatus.evolutionConfigured && (
+                      <span className="text-[11px] font-mono-tabular text-emerald-700 dark:text-emerald-400">
+                        Chave: {envStatus.evolutionKeyPreview}
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="cfg-evo-url"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      URL Base da Evolution API
+                    </label>
+                    <input
+                      id="cfg-evo-url"
+                      type="url"
+                      value={evolutionApiUrlInput}
+                      onChange={(e) => setEvolutionApiUrlInput(e.target.value)}
+                      placeholder="https://api.seudominio.com"
+                      className="w-full px-3 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="cfg-evo-key"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      Global API Key (apikey)
+                    </label>
+                    <input
+                      id="cfg-evo-key"
+                      type="password"
+                      value={evolutionApiKeyInput}
+                      onChange={(e) => setEvolutionApiKeyInput(e.target.value)}
+                      placeholder={
+                        envStatus.evolutionKeyPreview
+                          ? `Salva (${envStatus.evolutionKeyPreview}) — digite para substituir`
+                          : 'Cole a Global API Key da sua Evolution API'
+                      }
+                      className="w-full px-3 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={busyAction !== null}
+                      onClick={() => handleTestApiConnection('test_evolution')}
+                      className="px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+                    >
+                      {busyAction === 'test_evolution'
+                        ? 'Testando...'
+                        : 'Testar Evolution API'}
+                    </button>
+                    {envStatus.evolutionKeyPreview && (
+                      <button
+                        type="button"
+                        disabled={busyAction !== null}
+                        onClick={() =>
+                          handleSaveApiCredentials(undefined, { clearEvolutionKey: true })
+                        }
+                        className="px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
+                      >
+                        Remover chave
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="lg:col-span-2 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={busyAction !== null}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg disabled:opacity-60"
+                  >
+                    <Save className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>
+                      {busyAction === 'save_api_credentials'
+                        ? 'Salvando...'
+                        : 'Salvar Credenciais das APIs'}
+                    </span>
+                  </button>
+                </div>
+              </form>
+            </section>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

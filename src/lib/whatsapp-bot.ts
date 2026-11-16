@@ -786,10 +786,51 @@ export async function generateBrendiBotReply(params: {
   stockMovements?: StockMovement[];
   handoffTriggered?: boolean;
   pausedForHuman?: boolean;
+  optOutTriggered?: boolean;
 }> {
   const { state, phone, customerName, userMessage } = params;
   const cleanPhone = phone.replace(/\D/g, '') || 'anonimo';
-  const handoffList = state.store.evolution.humanHandoffPhones ?? [];
+  const evo = state.store.evolution;
+  const normalizedMsg = userMessage.toLowerCase().trim();
+
+  // Anti-Ban Opt-Out compliance: immediately honor STOP/PARAR requests
+  const optOutKeywords = [
+    'parar',
+    'sair',
+    'stop',
+    'descadastrar',
+    'cancelar mensagens',
+    'não quero receber',
+    'nao quero receber',
+    'pare de mandar',
+  ];
+  const isOptOutRequest =
+    evo.optOutEnabled !== false &&
+    optOutKeywords.some(
+      (kw) =>
+        normalizedMsg === kw ||
+        (kw.length > 4 && normalizedMsg.includes(kw)),
+    );
+
+  if (isOptOutRequest) {
+    const currentOptOut = evo.optOutPhones ?? [];
+    if (
+      cleanPhone.length >= 8 &&
+      !currentOptOut.some((p) =>
+        p.replace(/\D/g, '').endsWith(cleanPhone.slice(-8)),
+      )
+    ) {
+      evo.optOutPhones = [...currentOptOut, cleanPhone];
+    }
+    const firstName = customerName.split(' ')[0] || 'cliente';
+    return {
+      reply: `Tudo bem, ${firstName}! Removi seu número da nossa lista de mensagens automáticas. Você não receberá mais avisos ou ofertas por aqui.`,
+      engine: 'assistente_local',
+      optOutTriggered: true,
+    };
+  }
+
+  const handoffList = evo.humanHandoffPhones ?? [];
 
   if (
     cleanPhone.length >= 8 &&

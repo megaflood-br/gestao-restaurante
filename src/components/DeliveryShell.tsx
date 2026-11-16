@@ -2,16 +2,18 @@
 
 import { useEffect, useState } from 'react';
 import {
-  Store,
-  UtensilsCrossed,
-  ClipboardList,
-  MessageSquare,
-  Tags,
-  PackageCheck,
+  BarChart3,
   Bike,
-  Sun,
-  Moon,
+  ClipboardList,
+  ExternalLink,
   Menu,
+  MessageSquare,
+  Moon,
+  PackageCheck,
+  Settings,
+  Sun,
+  Tags,
+  UtensilsCrossed,
   X,
 } from 'lucide-react';
 import { INITIAL_DELIVERY_STATE } from '@/lib/delivery-seed';
@@ -19,13 +21,16 @@ import {
   applyOrderStockDeduction,
   reverseOrderStockDeduction,
 } from '@/lib/stock-engine';
-import { StageOneBase } from '@/components/StageOneBase';
 import { DigitalMenuSection } from '@/components/DigitalMenuSection';
 import { OrdersManagerSection } from '@/components/OrdersManagerSection';
 import { WhatsappEvolutionSection } from '@/components/WhatsappEvolutionSection';
 import { CatalogCouponsSection } from '@/components/CatalogCouponsSection';
 import { StockTechnicalSheetSection } from '@/components/StockTechnicalSheetSection';
 import { CouriersReportsSection } from '@/components/CouriersReportsSection';
+import {
+  SettingsSection,
+  type SettingsTabId,
+} from '@/components/SettingsSection';
 import type { OrderCreatedSideEffects } from '@/components/CartCheckoutDrawer';
 import type {
   Coupon,
@@ -46,48 +51,47 @@ import type {
 
 const STORAGE_KEY = 'casa-tempero-delivery-v1';
 
-const NAV_ITEMS: Array<{
-  id: DeliveryModuleId;
-  label: string;
-  icon: typeof Store;
-}> = [
-  { id: 'visao_base', label: 'Base e Loja', icon: Store },
+interface NavGroup {
+  groupLabel: string;
+  items: Array<{
+    id: DeliveryModuleId;
+    label: string;
+    icon: typeof ClipboardList;
+  }>;
+}
+
+const NAV_GROUPS: NavGroup[] = [
   {
-    id: 'cardapio_digital',
-    label: 'Cardápio Digital',
-    icon: UtensilsCrossed,
+    groupLabel: 'Operação',
+    items: [
+      { id: 'pedidos', label: 'Pedidos', icon: ClipboardList },
+      { id: 'atendimento', label: 'Atendimento IA', icon: MessageSquare },
+      { id: 'entregadores', label: 'Entregadores', icon: Bike },
+    ],
   },
   {
-    id: 'gestor_pedidos',
-    label: 'Gestor de Pedidos',
-    icon: ClipboardList,
+    groupLabel: 'Cardápio e Loja',
+    items: [
+      { id: 'cardapio', label: 'Cardápio', icon: UtensilsCrossed },
+      { id: 'promocoes', label: 'Promoções e Cupons', icon: Tags },
+      { id: 'estoque', label: 'Estoque e Fichas', icon: PackageCheck },
+      { id: 'vitrine', label: 'Cardápio Online', icon: ExternalLink },
+    ],
   },
   {
-    id: 'whatsapp_evolution',
-    label: 'Atendimento Virtual IA',
-    icon: MessageSquare,
-  },
-  {
-    id: 'catalogo_cupons',
-    label: 'Cardápio e Cupons',
-    icon: Tags,
-  },
-  {
-    id: 'estoque_ficha',
-    label: 'Estoque e Ficha Técnica',
-    icon: PackageCheck,
-  },
-  {
-    id: 'entregadores_relatorios',
-    label: 'Entregadores e Relatórios',
-    icon: Bike,
+    groupLabel: 'Análise e Ajustes',
+    items: [
+      { id: 'desempenho', label: 'Desempenho', icon: BarChart3 },
+      { id: 'configuracoes', label: 'Configurações', icon: Settings },
+    ],
   },
 ];
 
 export function DeliveryShell() {
   const [state, setState] = useState<DeliveryStoreState>(INITIAL_DELIVERY_STATE);
   const [activeModule, setActiveModule] =
-    useState<DeliveryModuleId>('whatsapp_evolution');
+    useState<DeliveryModuleId>('pedidos');
+  const [settingsTab, setSettingsTab] = useState<SettingsTabId>('loja');
   const [isDark, setIsDark] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -562,7 +566,21 @@ export function DeliveryShell() {
     }).catch(() => {});
   };
 
-  const activeNav = NAV_ITEMS.find((item) => item.id === activeModule);
+  const pendingOrdersCount = state.orders.filter(
+    (o) => o.status === 'pendente',
+  ).length;
+  const handoffChatsCount = (state.store.evolution.humanHandoffPhones ?? []).length;
+
+  const activeGroup = NAV_GROUPS.find((g) =>
+    g.items.some((i) => i.id === activeModule),
+  );
+  const activeNav = activeGroup?.items.find((i) => i.id === activeModule);
+
+  const openSettingsAt = (tab: SettingsTabId = 'loja') => {
+    setSettingsTab(tab);
+    setActiveModule('configuracoes');
+    setMobileMenuOpen(false);
+  };
 
   const sidebarContent = (
     <div className="flex flex-col h-full w-64 bg-white dark:bg-[#13151c] border-r border-slate-200 dark:border-slate-800">
@@ -570,7 +588,7 @@ export function DeliveryShell() {
         <button
           type="button"
           onClick={() => {
-            setActiveModule('visao_base');
+            setActiveModule('pedidos');
             setMobileMenuOpen(false);
           }}
           className="inline-flex items-center gap-2.5 text-base font-extrabold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0"
@@ -590,32 +608,59 @@ export function DeliveryShell() {
         </button>
       </div>
 
-      <nav className="flex-1 px-3 py-5 space-y-1" aria-label="Módulos do sistema">
-        {NAV_ITEMS.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeModule === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => {
-                setActiveModule(item.id);
-                setMobileMenuOpen(false);
-              }}
-              aria-current={isActive ? 'page' : undefined}
-              className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 text-sm font-semibold rounded-lg transition-colors whitespace-nowrap ${
-                isActive
-                  ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/60 dark:text-brand-400'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-100 dark:hover:bg-slate-800/60'
-              }`}
-            >
-              <span className="flex items-center gap-2.5 min-w-0">
-                <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
-                <span className="truncate">{item.label}</span>
-              </span>
-            </button>
-          );
-        })}
+      <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto" aria-label="Menu principal">
+        {NAV_GROUPS.map((group) => (
+          <div key={group.groupLabel}>
+            <p className="px-3 mb-1.5 text-[11px] font-semibold tracking-wide text-slate-400 dark:text-slate-500">
+              {group.groupLabel}
+            </p>
+            <div className="space-y-0.5">
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeModule === item.id;
+                const counter =
+                  item.id === 'pedidos' && pendingOrdersCount > 0
+                    ? pendingOrdersCount
+                    : item.id === 'atendimento' && handoffChatsCount > 0
+                      ? handoffChatsCount
+                      : null;
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setActiveModule(item.id);
+                      setMobileMenuOpen(false);
+                    }}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-sm font-semibold rounded-lg transition-colors whitespace-nowrap ${
+                      isActive
+                        ? 'bg-brand-50 text-brand-700 dark:bg-brand-950/60 dark:text-brand-400'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-100 dark:hover:bg-slate-800/60'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5 min-w-0">
+                      <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />
+                      <span className="truncate">{item.label}</span>
+                    </span>
+                    {counter !== null && (
+                      <span
+                        className={`text-xs font-mono-tabular font-bold shrink-0 ${
+                          isActive
+                            ? 'text-brand-700 dark:text-brand-300'
+                            : 'text-brand-600 dark:text-brand-400'
+                        }`}
+                      >
+                        {counter}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       <div className="p-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
@@ -632,14 +677,18 @@ export function DeliveryShell() {
           )}
         </button>
 
-        <div className="px-1 text-xs">
-          <p className="font-medium text-slate-900 dark:text-slate-100 truncate">
+        <button
+          type="button"
+          onClick={() => openSettingsAt('loja')}
+          className="w-full text-left px-1 py-0.5 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors text-xs"
+        >
+          <p className="font-semibold text-slate-900 dark:text-slate-100 truncate">
             {state.store.name}
           </p>
           <p className="text-slate-500 dark:text-slate-400 truncate">
             {state.store.openingHours}
           </p>
-        </div>
+        </button>
       </div>
     </div>
   );
@@ -671,10 +720,10 @@ export function DeliveryShell() {
               <Menu className="w-5 h-5" />
             </button>
             <nav aria-label="Localização" className="flex items-center gap-2 text-sm min-w-0">
-              <span className="text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                PedidoFácil
+              <span className="text-slate-400 dark:text-slate-500 whitespace-nowrap hidden sm:inline">
+                {activeGroup?.groupLabel}
               </span>
-              <span className="text-slate-300 dark:text-slate-600" aria-hidden="true">
+              <span className="text-slate-300 dark:text-slate-600 hidden sm:inline" aria-hidden="true">
                 /
               </span>
               <span className="font-semibold text-slate-900 dark:text-slate-100 truncate">
@@ -683,39 +732,29 @@ export function DeliveryShell() {
             </nav>
           </div>
 
-          <button
-            type="button"
-            onClick={handleToggleStoreOpen}
-            className={`px-3.5 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
-              state.store.isOpen
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800'
-                : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800'
-            }`}
-          >
-            {state.store.isOpen ? 'Loja Aberta' : 'Loja Fechada'}
-          </button>
+          <div className="flex items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={handleToggleStoreOpen}
+              className={`px-3.5 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
+                state.store.isOpen
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800'
+                  : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800'
+              }`}
+            >
+              {state.store.isOpen ? 'Loja Aberta' : 'Loja Fechada'}
+            </button>
+          </div>
         </header>
 
         <main className="flex-1 p-5 sm:p-8 max-w-7xl w-full mx-auto">
-          {activeModule === 'visao_base' ? (
-            <StageOneBase
-              state={state}
-              onUpdateStore={handleUpdateStore}
-              onToggleStoreOpen={handleToggleStoreOpen}
-              onSelectModule={setActiveModule}
-            />
-          ) : activeModule === 'cardapio_digital' ? (
-            <DigitalMenuSection
-              state={state}
-              onOrderCreated={handleOrderCreated}
-            />
-          ) : activeModule === 'gestor_pedidos' ? (
+          {activeModule === 'pedidos' ? (
             <OrdersManagerSection
               state={state}
               onOrderCreated={handleOrderCreated}
               onUpdateOrderStatus={handleUpdateOrderStatus}
             />
-          ) : activeModule === 'whatsapp_evolution' ? (
+          ) : activeModule === 'atendimento' ? (
             <WhatsappEvolutionSection
               state={state}
               onUpdateEvolution={handleUpdateEvolution}
@@ -723,10 +762,20 @@ export function DeliveryShell() {
               onOrderCreatedFromBot={(order, stockMovements, ingredients) =>
                 handleOrderCreated(order, { stockMovements, ingredients })
               }
-              onOpenOrders={() => setActiveModule('gestor_pedidos')}
+              onOpenOrders={() => setActiveModule('pedidos')}
+              onOpenSettings={openSettingsAt}
             />
-          ) : activeModule === 'catalogo_cupons' ? (
+          ) : activeModule === 'entregadores' ? (
+            <CouriersReportsSection
+              mode="entregadores"
+              state={state}
+              onAddCourier={handleAddCourier}
+              onUpdateCourier={handleUpdateCourier}
+              onUpdateOrderStatus={handleUpdateOrderStatus}
+            />
+          ) : activeModule === 'cardapio' ? (
             <CatalogCouponsSection
+              mode="cardapio"
               state={state}
               onAddMenuItem={handleAddMenuItem}
               onUpdateMenuItem={handleUpdateMenuItem}
@@ -736,21 +785,76 @@ export function DeliveryShell() {
               onAddCoupon={handleAddCoupon}
               onToggleCoupon={handleToggleCoupon}
               onDeleteCoupon={handleDeleteCoupon}
-              onOpenTechnicalSheet={() => setActiveModule('estoque_ficha')}
+              onOpenTechnicalSheet={() => setActiveModule('estoque')}
             />
-          ) : activeModule === 'estoque_ficha' ? (
+          ) : activeModule === 'promocoes' ? (
+            <CatalogCouponsSection
+              mode="promocoes"
+              state={state}
+              onAddMenuItem={handleAddMenuItem}
+              onUpdateMenuItem={handleUpdateMenuItem}
+              onDeleteMenuItem={handleDeleteMenuItem}
+              onAddCategory={handleAddCategory}
+              onToggleCategory={handleToggleCategory}
+              onAddCoupon={handleAddCoupon}
+              onToggleCoupon={handleToggleCoupon}
+              onDeleteCoupon={handleDeleteCoupon}
+              onOpenTechnicalSheet={() => setActiveModule('estoque')}
+            />
+          ) : activeModule === 'estoque' ? (
             <StockTechnicalSheetSection
               state={state}
               onUpdateTechnicalSheet={handleUpdateTechnicalSheet}
               onAddIngredient={handleAddIngredient}
               onAdjustStock={handleAdjustStock}
             />
-          ) : (
+          ) : activeModule === 'vitrine' ? (
+            <div className="space-y-5">
+              <div className="px-4 py-3 bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  <strong className="text-slate-900 dark:text-white">
+                    Pré-visualização do Cardápio Online
+                  </strong>{' '}
+                  — pedidos finalizados aqui entram imediatamente na fila do Gestor de Pedidos com baixa automática de estoque.
+                </p>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setActiveModule('cardapio')}
+                    className="px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg whitespace-nowrap"
+                  >
+                    Editar Cardápio
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveModule('pedidos')}
+                    className="px-3 py-1.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg whitespace-nowrap"
+                  >
+                    Ver Pedidos
+                  </button>
+                </div>
+              </div>
+              <DigitalMenuSection
+                state={state}
+                onOrderCreated={handleOrderCreated}
+              />
+            </div>
+          ) : activeModule === 'desempenho' ? (
             <CouriersReportsSection
+              mode="desempenho"
               state={state}
               onAddCourier={handleAddCourier}
               onUpdateCourier={handleUpdateCourier}
               onUpdateOrderStatus={handleUpdateOrderStatus}
+            />
+          ) : (
+            <SettingsSection
+              state={state}
+              initialTab={settingsTab}
+              onUpdateStore={handleUpdateStore}
+              onToggleStoreOpen={handleToggleStoreOpen}
+              onUpdateEvolution={handleUpdateEvolution}
+              onOpenChatInbox={() => setActiveModule('atendimento')}
             />
           )}
         </main>

@@ -1,10 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDeliveryStore } from '@/lib/server-store';
 import {
+  calculateHumanTypingDelayMs,
   getEvolutionEnvConfig,
   sendEvolutionText,
 } from '@/lib/evolution-client';
 import { generateBrendiBotReply } from '@/lib/whatsapp-bot';
+
+declare global {
+  var __evolutionProcessedMessageIds: string[] | undefined;
+}
+
+function isDuplicateMessageId(messageId?: string): boolean {
+  if (!messageId) return false;
+  if (!globalThis.__evolutionProcessedMessageIds) {
+    globalThis.__evolutionProcessedMessageIds = [];
+  }
+  const list = globalThis.__evolutionProcessedMessageIds;
+  if (list.includes(messageId)) return true;
+  list.push(messageId);
+  if (list.length > 200) {
+    list.splice(0, list.length - 200);
+  }
+  return false;
+}
 
 interface EvolutionWebhookPayload {
   event?: string;
@@ -15,6 +34,7 @@ interface EvolutionWebhookPayload {
   message?: string;
   data?: {
     key?: {
+      id?: string;
       remoteJid?: string;
       fromMe?: boolean;
     };
@@ -47,14 +67,19 @@ export async function POST(request: NextRequest) {
     const env = getEvolutionEnvConfig();
     const now = new Date().toISOString();
 
-    const eventName = (body.event ?? (body.simulated ? 'MESSAGES_UPSERT' : '')).toUpperCase();
+    const eventName = (
+      body.event ?? (body.simulated ? 'MESSAGES_UPSERT' : '')
+    ).toUpperCase();
 
     if (eventName === 'CONNECTION_UPDATE') {
       const state = body.data?.state?.toLowerCase();
       if (state === 'open') db.store.evolution.connectionStatus = 'conectado';
       if (state === 'close') db.store.evolution.connectionStatus = 'desconectado';
       db.store.evolution.lastSyncAt = now;
-      return NextResponse.json({ ok: true, connectionStatus: db.store.evolution.connectionStatus });
+      return NextResponse.json({
+        ok: true,
+        connectionStatus: db.store.evolution.connectionStatus,
+      });
     }
 
     if (eventName === 'QRCODE_UPDATED') {
@@ -69,10 +94,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, ignored: 'fromMe' });
     }
 
-    const rawPhone =
-      body.phone ||
-      body.data?.key?.remoteJid?.replace(/@.*/, '') ||
-      '';
+    // Anti-ban guideline: never auto-reply in WhatsApp groups (@g.us)
+    const remoteJid = body.data?.key?.remoteJid ?? '';
+    if (remoteJid.endsWith('@g.us')) {
+      return NextResponse.json({ ok: true, ignored: 'group_message' });
+    }
+
+    // Anti-ban guideline: deduplicate repeated webhook deliveries by message ID
+    const messageId = body.data?.key?.id;
+    if (!body.simulated && isDuplicateMessageId(messageId)) {
+      return NextResponse.json({ ok: true, ignored: 'duplicate_message' });
+    }
+
+    const rawPhone = body.phone || remoteJid.replace(/@.*/, '') || '';
     const cleanPhone = rawPhone.replace(/\D/g, '');
     const customerName =
       body.customerName?.trim() ||
@@ -126,6 +160,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const typingDelayMs = calculateHumanTypingDelayMs(
+      botRes.reply,
+      db.store.evolution,
+    );
+
     let outboundStatus: 'enviada' | 'simulada' | 'erro' = 'simulada';
     if (
       !body.simulated &&
@@ -136,6 +175,10 @@ export async function POST(request: NextRequest) {
         db.store.evolution.instanceName,
         cleanPhone,
         botRes.reply,
+        {
+          delayMs: typingDelayMs,
+          bypassOptOut: Boolean(botRes.optOutTriggered),
+        },
       );
       outboundStatus = sendRes.ok ? 'enviada' : 'erro';
     }
@@ -146,14 +189,17 @@ export async function POST(request: NextRequest) {
       phone: cleanPhone,
       customerName,
       message: botRes.reply,
-      event: botRes.createdOrder
-        ? 'AI_ORDER_CREATED'
-        : botRes.handoffTriggered
-          ? 'AI_HUMAN_HANDOFF'
-          : 'AUTO_REPLY_BOT',
+      event: botRes.optOutTriggered
+        ? 'AI_OPT_OUT'
+        : botRes.createdOrder
+          ? 'AI_ORDER_CREATED'
+          : botRes.handoffTriggered
+            ? 'AI_HUMAN_HANDOFF'
+            : 'AUTO_REPLY_BOT',
       status: outboundStatus,
       engine: botRes.engine,
       orderNumber: botRes.createdOrder?.orderNumber,
+      delayMs: typingDelayMs,
       timestamp: new Date().toISOString(),
     };
 
@@ -165,8 +211,10 @@ export async function POST(request: NextRequest) {
       outboundLog,
       reply: botRes.reply,
       engine: botRes.engine,
+      typingDelayMs,
       pausedForHuman: false,
       handoffTriggered: Boolean(botRes.handoffTriggered),
+      optOutTriggered: Boolean(botRes.optOutTriggered),
       createdOrder: botRes.createdOrder ?? null,
       stockMovements: botRes.stockMovements ?? [],
       ingredients: botRes.createdOrder ? db.ingredients : undefined,

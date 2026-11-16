@@ -30,6 +30,13 @@ export const INITIAL_DELIVERY_STATE: DeliveryStoreState = {
       upsellEnabled: true,
       humanHandoffEnabled: true,
       humanHandoffPhones: [],
+      typingPresenceEnabled: true,
+      typingMinDelayMs: 1800,
+      typingMaxDelayMs: 4800,
+      antiBanPacingMs: 2200,
+      disableLinkPreview: true,
+      optOutEnabled: true,
+      optOutPhones: [],
       templates: {
         boasVindas:
           'Olá, {cliente}! Bem-vindo à Casa do Tempero. Faça seu pedido rapidinho pelo nosso cardápio digital: {link_cardapio}',

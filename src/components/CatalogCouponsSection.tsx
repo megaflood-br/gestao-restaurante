@@ -23,6 +23,7 @@ import type {
 } from '@/types/delivery';
 
 interface CatalogCouponsSectionProps {
+  mode?: 'cardapio' | 'promocoes';
   state: DeliveryStoreState;
   onAddMenuItem: (item: MenuItem) => void;
   onUpdateMenuItem: (id: string, updates: Partial<MenuItem>) => void;
@@ -59,6 +60,7 @@ const IMAGE_PRESETS = [
 ];
 
 export function CatalogCouponsSection({
+  mode = 'cardapio',
   state,
   onAddMenuItem,
   onUpdateMenuItem,
@@ -70,7 +72,9 @@ export function CatalogCouponsSection({
   onDeleteCoupon,
   onOpenTechnicalSheet,
 }: CatalogCouponsSectionProps) {
-  const [activeTab, setActiveTab] = useState<'pratos' | 'cupons' | 'categorias'>('pratos');
+  const [catalogTab, setCatalogTab] = useState<'pratos' | 'categorias'>('pratos');
+  const activeTab: 'pratos' | 'categorias' | 'cupons' =
+    mode === 'promocoes' ? 'cupons' : catalogTab;
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('todas');
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
@@ -333,71 +337,105 @@ export function CatalogCouponsSection({
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-white text-balance">
-            Gestão de Cardápio e Cupons
+            {mode === 'promocoes' ? 'Promoções e Cupons' : 'Gestão de Cardápio'}
           </h1>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            Cadastre pratos, ajuste preços promocionais, pause itens esgotados em 1 clique e crie cupons de desconto.
+            {mode === 'promocoes'
+              ? 'Crie códigos promocionais e regras de desconto para o Cardápio Online e Atendimento WhatsApp.'
+              : 'Cadastre pratos, ajuste preços promocionais, pause itens esgotados em 1 clique e organize categorias.'}
           </p>
         </div>
 
-        <div
-          role="tablist"
-          aria-label="Seções de catálogo"
-          className="inline-flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg self-start sm:self-auto"
-        >
-          {(
-            [
-              { id: 'pratos', label: 'Pratos e Pausas' },
-              { id: 'cupons', label: 'Cupons' },
-              { id: 'categorias', label: 'Categorias' },
-            ] as const
-          ).map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={activeTab === tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
-                activeTab === tab.id
-                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        {mode === 'cardapio' && (
+          <div
+            role="tablist"
+            aria-label="Seções do cardápio"
+            className="inline-flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg self-start sm:self-auto"
+          >
+            {(
+              [
+                { id: 'pratos', label: 'Pratos e Pausas' },
+                { id: 'categorias', label: 'Categorias' },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={catalogTab === tab.id}
+                onClick={() => setCatalogTab(tab.id)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                  catalogTab === tab.id
+                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <section
-        aria-label="Resumo do catálogo"
+        aria-label={mode === 'promocoes' ? 'Resumo de promoções' : 'Resumo do catálogo'}
         className="grid grid-cols-2 lg:grid-cols-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800"
       >
-        <div className="p-4 sm:p-5">
-          <p className="text-xs text-slate-500 dark:text-slate-400">Total de Pratos</p>
-          <p className="mt-1 text-2xl font-bold font-mono-tabular text-slate-900 dark:text-white">
-            {state.menuItems.length}
-          </p>
-        </div>
-        <div className="p-4 sm:p-5">
-          <p className="text-xs text-slate-500 dark:text-slate-400">Disponíveis no Cardápio</p>
-          <p className="mt-1 text-2xl font-bold font-mono-tabular text-emerald-700 dark:text-emerald-400">
-            {availableCount}
-          </p>
-        </div>
-        <div className="p-4 sm:p-5">
-          <p className="text-xs text-slate-500 dark:text-slate-400">Pausados / Esgotados</p>
-          <p className="mt-1 text-2xl font-bold font-mono-tabular text-amber-700 dark:text-amber-400">
-            {pausedCount}
-          </p>
-        </div>
-        <div className="p-4 sm:p-5">
-          <p className="text-xs text-slate-500 dark:text-slate-400">Cupons Ativos</p>
-          <p className="mt-1 text-2xl font-bold font-mono-tabular text-brand-600 dark:text-brand-400">
-            {activeCouponsCount}
-          </p>
-        </div>
+        {mode === 'promocoes' ? (
+          <>
+            <div className="p-4 sm:p-5">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Cupons Cadastrados</p>
+              <p className="mt-1 text-2xl font-bold font-mono-tabular text-slate-900 dark:text-white">
+                {state.coupons.length}
+              </p>
+            </div>
+            <div className="p-4 sm:p-5">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Cupons Ativos</p>
+              <p className="mt-1 text-2xl font-bold font-mono-tabular text-emerald-700 dark:text-emerald-400">
+                {activeCouponsCount}
+              </p>
+            </div>
+            <div className="p-4 sm:p-5">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Usos Registrados</p>
+              <p className="mt-1 text-2xl font-bold font-mono-tabular text-brand-600 dark:text-brand-400">
+                {state.coupons.reduce((acc, c) => acc + c.usageCount, 0)}
+              </p>
+            </div>
+            <div className="p-4 sm:p-5">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Pratos em Oferta</p>
+              <p className="mt-1 text-2xl font-bold font-mono-tabular text-amber-700 dark:text-amber-400">
+                {state.menuItems.filter((i) => i.promoPrice && i.promoPrice < i.price).length}
+              </p>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="p-4 sm:p-5">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Total de Pratos</p>
+              <p className="mt-1 text-2xl font-bold font-mono-tabular text-slate-900 dark:text-white">
+                {state.menuItems.length}
+              </p>
+            </div>
+            <div className="p-4 sm:p-5">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Disponíveis no Cardápio</p>
+              <p className="mt-1 text-2xl font-bold font-mono-tabular text-emerald-700 dark:text-emerald-400">
+                {availableCount}
+              </p>
+            </div>
+            <div className="p-4 sm:p-5">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Pausados / Esgotados</p>
+              <p className="mt-1 text-2xl font-bold font-mono-tabular text-amber-700 dark:text-amber-400">
+                {pausedCount}
+              </p>
+            </div>
+            <div className="p-4 sm:p-5">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Categorias Ativas</p>
+              <p className="mt-1 text-2xl font-bold font-mono-tabular text-brand-600 dark:text-brand-400">
+                {state.categories.length}
+              </p>
+            </div>
+          </>
+        )}
       </section>
 
       {activeTab === 'pratos' && (
