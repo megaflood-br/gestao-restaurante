@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import {
   CheckCircle2,
   Plus,
+  Receipt,
   Trash2,
 } from 'lucide-react';
 import {
@@ -12,13 +13,17 @@ import {
   ORDER_SOURCE_LABEL,
   PAYMENT_METHOD_LABEL,
 } from '@/lib/formatters';
+import { CourierProfileView } from '@/components/CourierProfileView';
 import type {
   Courier,
+  CourierSettlement,
   CourierStatus,
   DeliveryStoreState,
+  FinancialEntry,
   OrderSource,
   OrderStatus,
   PaymentMethod,
+  WhatsappLog,
 } from '@/types/delivery';
 
 interface CouriersReportsSectionProps {
@@ -32,6 +37,10 @@ interface CouriersReportsSectionProps {
     status: OrderStatus,
     courierId?: string,
   ) => Promise<void>;
+  onAddSettlement?: (settlement: CourierSettlement) => void;
+  onUpdateSettlement?: (id: string, updates: Partial<CourierSettlement>) => void;
+  onAddFinancialEntry?: (entry: FinancialEntry) => void;
+  onAppendWhatsappLogs?: (logs: WhatsappLog[]) => void;
 }
 
 type ReportPeriod = 'hoje' | '7dias' | '30dias';
@@ -49,14 +58,20 @@ export function CouriersReportsSection({
   onUpdateCourier,
   onDeleteCourier,
   onUpdateOrderStatus,
+  onAddSettlement,
+  onUpdateSettlement,
+  onAddFinancialEntry,
+  onAppendWhatsappLogs,
 }: CouriersReportsSectionProps) {
   const activeTab = mode === 'entregadores' ? 'entregadores' : 'relatorios';
   const [period, setPeriod] = useState<ReportPeriod>('7dias');
+  const [selectedCourierId, setSelectedCourierId] = useState<string | null>(null);
 
   const [courierName, setCourierName] = useState('');
   const [courierPhone, setCourierPhone] = useState('');
   const [courierVehicle, setCourierVehicle] = useState('');
   const [courierPlate, setCourierPlate] = useState('');
+  const [courierPixKey, setCourierPixKey] = useState('');
   const [addingCourier, setAddingCourier] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
@@ -229,6 +244,7 @@ export function CouriersReportsSection({
           phone: courierPhone.trim(),
           vehicle: courierVehicle.trim() || 'Moto 160cc',
           plate: courierPlate.trim() || 'SEM-PLACA',
+          pixKey: courierPixKey.trim() || undefined,
         }),
       }).catch(() => null);
       const data = res
@@ -247,16 +263,39 @@ export function CouriersReportsSection({
           status: 'disponivel',
           active: true,
           deliveriesToday: 0,
+          pixKey: courierPixKey.trim() || undefined,
         });
       }
       setCourierName('');
       setCourierPhone('');
       setCourierVehicle('');
       setCourierPlate('');
+      setCourierPixKey('');
     } finally {
       setAddingCourier(false);
     }
   };
+
+  const selectedCourier =
+    mode === 'entregadores' && selectedCourierId
+      ? state.couriers.find((c) => c.id === selectedCourierId) ?? null
+      : null;
+
+  if (selectedCourier) {
+    return (
+      <CourierProfileView
+        courier={selectedCourier}
+        state={state}
+        onBack={() => setSelectedCourierId(null)}
+        onUpdateCourier={onUpdateCourier}
+        onUpdateOrderStatus={onUpdateOrderStatus}
+        onAddSettlement={onAddSettlement ?? (() => {})}
+        onUpdateSettlement={onUpdateSettlement ?? (() => {})}
+        onAddFinancialEntry={onAddFinancialEntry ?? (() => {})}
+        onAppendWhatsappLogs={onAppendWhatsappLogs ?? (() => {})}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -603,6 +642,21 @@ export function CouriersReportsSection({
                     />
                   </div>
                 </div>
+                <div>
+                  <label
+                    htmlFor="cour-pix"
+                    className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                  >
+                    Chave Pix (para fechamento diário)
+                  </label>
+                  <input
+                    id="cour-pix"
+                    value={courierPixKey}
+                    onChange={(e) => setCourierPixKey(e.target.value)}
+                    placeholder="CPF, telefone ou e-mail Pix"
+                    className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                  />
+                </div>
                 <button
                   type="submit"
                   disabled={addingCourier}
@@ -630,7 +684,8 @@ export function CouriersReportsSection({
                       o.courierId === courier.id &&
                       (o.status === 'entrega' || o.status === 'pronto'),
                   );
-                  const feePayout = courier.deliveriesToday * state.store.deliveryFee;
+                  const unitFee = courier.feePerDelivery ?? state.store.deliveryFee;
+                  const feePayout = courier.deliveriesToday * unitFee;
                   const confirmingDelete = confirmDeleteId === courier.id;
 
                   return (
@@ -641,9 +696,13 @@ export function CouriersReportsSection({
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div>
                           <div className="flex items-center gap-2.5">
-                            <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCourierId(courier.id)}
+                              className="text-base font-bold text-slate-900 dark:text-white hover:text-brand-600 dark:hover:text-brand-400 text-left transition-colors"
+                            >
                               {courier.name}
-                            </h3>
+                            </button>
                             <span
                               className={`text-xs font-semibold ${
                                 courier.status === 'disponivel'
@@ -658,6 +717,7 @@ export function CouriersReportsSection({
                           </div>
                           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 font-mono-tabular">
                             {courier.phone} · {courier.vehicle} ({courier.plate})
+                            {courier.pixKey ? ` · Pix: ${courier.pixKey}` : ''}
                           </p>
                         </div>
 
@@ -668,6 +728,14 @@ export function CouriersReportsSection({
                               {courier.deliveriesToday} entregas · {formatCurrencyBRL(feePayout)}
                             </strong>
                           </div>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCourierId(courier.id)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-950/50 border border-brand-200 dark:border-brand-800 hover:bg-brand-100 dark:hover:bg-brand-900/50 rounded-lg whitespace-nowrap"
+                          >
+                            <Receipt className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Perfil e Fechamento</span>
+                          </button>
                           <select
                             aria-label={`Status de ${courier.name}`}
                             value={courier.status}

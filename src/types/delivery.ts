@@ -232,6 +232,30 @@ export interface Courier {
   status: CourierStatus;
   active: boolean;
   deliveriesToday: number;
+  pixKey?: string;
+  feePerDelivery?: number;
+  fixedDailyPay?: number;
+}
+
+export interface CourierSettlement {
+  id: string;
+  courierId: string;
+  courierName: string;
+  date: string;
+  deliveriesCount: number;
+  orderNumbers: number[];
+  deliveryFeesTotal: number;
+  fixedDailyPay: number;
+  bonusAmount: number;
+  discountAmount: number;
+  totalPaid: number;
+  paymentMethod: string;
+  pixKey?: string;
+  notes?: string;
+  whatsappSent?: boolean;
+  whatsappStatus?: string;
+  receiptText: string;
+  createdAt: string;
 }
 
 export interface WhatsappLog {
@@ -303,4 +327,5 @@ export interface DeliveryStoreState {
   stockMovements: StockMovement[];
   financialEntries: FinancialEntry[];
   recurringExpenses: RecurringExpense[];
+  courierSettlements: CourierSettlement[];
 }

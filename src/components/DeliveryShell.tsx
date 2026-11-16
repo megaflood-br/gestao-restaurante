@@ -41,6 +41,7 @@ import type { OrderCreatedSideEffects } from '@/components/CartCheckoutDrawer';
 import type {
   Coupon,
   Courier,
+  CourierSettlement,
   DeliveryModuleId,
   DeliveryStoreState,
   EvolutionConfig,
@@ -163,6 +164,9 @@ export function DeliveryShell() {
               recurringExpenses: Array.isArray(parsed.recurringExpenses)
                 ? parsed.recurringExpenses
                 : INITIAL_DELIVERY_STATE.recurringExpenses,
+              courierSettlements: Array.isArray(parsed.courierSettlements)
+                ? parsed.courierSettlements
+                : INITIAL_DELIVERY_STATE.courierSettlements,
             });
             return;
           }
@@ -528,6 +532,25 @@ export function DeliveryShell() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id }),
     }).catch(() => {});
+  };
+
+  const handleAddCourierSettlement = (settlement: CourierSettlement) => {
+    persistState((prev) => ({
+      ...prev,
+      courierSettlements: [settlement, ...prev.courierSettlements],
+    }));
+  };
+
+  const handleUpdateCourierSettlement = (
+    id: string,
+    updates: Partial<CourierSettlement>,
+  ) => {
+    persistState((prev) => ({
+      ...prev,
+      courierSettlements: prev.courierSettlements.map((s) =>
+        s.id === id ? { ...s, ...updates } : s,
+      ),
+    }));
   };
 
   const handleUpdateTechnicalSheet = (
@@ -944,6 +967,10 @@ export function DeliveryShell() {
               onUpdateCourier={handleUpdateCourier}
               onDeleteCourier={handleDeleteCourier}
               onUpdateOrderStatus={handleUpdateOrderStatus}
+              onAddSettlement={handleAddCourierSettlement}
+              onUpdateSettlement={handleUpdateCourierSettlement}
+              onAddFinancialEntry={handleAddFinancialEntry}
+              onAppendWhatsappLogs={handleAppendWhatsappLogs}
             />
           ) : activeModule === 'cardapio' ? (
             <CatalogCouponsSection

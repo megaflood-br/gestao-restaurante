@@ -14,6 +14,9 @@ export async function POST(request: NextRequest) {
       phone: string;
       vehicle: string;
       plate: string;
+      pixKey?: string;
+      feePerDelivery?: number;
+      fixedDailyPay?: number;
     };
     const db = getDeliveryStore();
 
@@ -33,6 +36,15 @@ export async function POST(request: NextRequest) {
       status: 'disponivel',
       active: true,
       deliveriesToday: 0,
+      pixKey: body.pixKey?.trim() || undefined,
+      feePerDelivery:
+        typeof body.feePerDelivery === 'number' && body.feePerDelivery >= 0
+          ? body.feePerDelivery
+          : undefined,
+      fixedDailyPay:
+        typeof body.fixedDailyPay === 'number' && body.fixedDailyPay >= 0
+          ? body.fixedDailyPay
+          : undefined,
     };
 
     db.couriers = [courier, ...db.couriers];
