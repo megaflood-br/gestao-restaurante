@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getDeliveryStore,
+  getGoogleMapsApiKey,
   getRuntimeApiCredentials,
   maskSecret,
   updateRuntimeApiCredentials,
@@ -22,6 +23,7 @@ function buildEnvStatusPayload() {
   const env = getEvolutionEnvConfig();
   const openAi = getOpenAiRuntimeConfig();
   const raw = getRuntimeApiCredentials();
+  const mapsKey = getGoogleMapsApiKey();
   return {
     evolutionConfigured: env.isConfigured,
     evolutionApiUrl: raw.evolutionApiUrl,
@@ -29,6 +31,8 @@ function buildEnvStatusPayload() {
     openAiConfigured: openAi.isConfigured,
     openAiModel: openAi.model,
     openAiKeyPreview: maskSecret(raw.openAiApiKey),
+    googleMapsConfigured: Boolean(mapsKey),
+    googleMapsKeyPreview: maskSecret(mapsKey),
     defaultInstance: env.defaultInstance,
   };
 }
@@ -84,8 +88,10 @@ export async function POST(request: NextRequest) {
       evolutionApiKey?: string;
       openAiApiKey?: string;
       openAiModel?: string;
+      googleMapsApiKey?: string;
       clearEvolutionKey?: boolean;
       clearOpenAiKey?: boolean;
+      clearGoogleMapsKey?: boolean;
     };
 
     const db = getDeliveryStore();
@@ -103,8 +109,10 @@ export async function POST(request: NextRequest) {
         evolutionApiKey: body.evolutionApiKey,
         openAiApiKey: body.openAiApiKey,
         openAiModel: body.openAiModel,
+        googleMapsApiKey: body.googleMapsApiKey,
         clearEvolutionKey: body.clearEvolutionKey,
         clearOpenAiKey: body.clearOpenAiKey,
+        clearGoogleMapsKey: body.clearGoogleMapsKey,
       });
       return NextResponse.json({
         ok: true,

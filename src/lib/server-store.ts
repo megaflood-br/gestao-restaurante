@@ -6,6 +6,7 @@ export interface RuntimeApiCredentials {
   evolutionApiKey: string;
   openAiApiKey: string;
   openAiModel: string;
+  googleMapsApiKey?: string;
 }
 
 declare global {
@@ -18,6 +19,22 @@ function sanitizeEnvValue(val: string | undefined, placeholders: string[]): stri
   if (!trimmed) return '';
   if (placeholders.some((p) => trimmed.includes(p))) return '';
   return trimmed;
+}
+
+export function getGoogleMapsApiKey(): string {
+  const runtime = getRuntimeApiCredentials();
+  if (runtime.googleMapsApiKey) return runtime.googleMapsApiKey;
+
+  const envCandidates = [
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY,
+    process.env.GOOGLE_MAPS_API_KEY,
+    (globalThis as Record<string, unknown>).GOOGLE_MAPS_API_KEY as string | undefined,
+  ];
+  for (const candidate of envCandidates) {
+    const clean = sanitizeEnvValue(candidate, ['MY_GOOGLE_MAPS_API_KEY']);
+    if (clean) return clean;
+  }
+  return '';
 }
 
 export function getRuntimeApiCredentials(): RuntimeApiCredentials {
@@ -33,6 +50,10 @@ export function getRuntimeApiCredentials(): RuntimeApiCredentials {
         'MY_OPENAI_API_KEY',
       ]),
       openAiModel: (process.env.OPENAI_MODEL ?? 'gpt-4o-mini').trim() || 'gpt-4o-mini',
+      googleMapsApiKey: sanitizeEnvValue(
+        process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY,
+        ['MY_GOOGLE_MAPS_API_KEY'],
+      ),
     };
   }
   return globalThis.__deliveryApiCredentials;
@@ -42,6 +63,7 @@ export function updateRuntimeApiCredentials(
   updates: Partial<RuntimeApiCredentials> & {
     clearEvolutionKey?: boolean;
     clearOpenAiKey?: boolean;
+    clearGoogleMapsKey?: boolean;
   },
 ): RuntimeApiCredentials {
   const current = getRuntimeApiCredentials();
@@ -64,6 +86,11 @@ export function updateRuntimeApiCredentials(
       typeof updates.openAiModel === 'string' && updates.openAiModel.trim()
         ? updates.openAiModel.trim()
         : current.openAiModel,
+    googleMapsApiKey: updates.clearGoogleMapsKey
+      ? ''
+      : typeof updates.googleMapsApiKey === 'string' && updates.googleMapsApiKey.trim()
+        ? updates.googleMapsApiKey.trim()
+        : current.googleMapsApiKey,
   };
   globalThis.__deliveryApiCredentials = next;
   return next;

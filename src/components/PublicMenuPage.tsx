@@ -24,7 +24,14 @@ export function PublicMenuPage() {
         if (localRaw) {
           const parsed = JSON.parse(localRaw) as DeliveryStoreState;
           if (!cancelled && parsed.store && parsed.menuItems && parsed.orders) {
-            setState(parsed);
+            setState({
+              ...INITIAL_DELIVERY_STATE,
+              ...parsed,
+              store: {
+                ...INITIAL_DELIVERY_STATE.store,
+                ...parsed.store,
+              },
+            });
             return;
           }
         }
@@ -136,9 +143,18 @@ export function PublicMenuPage() {
     <div className="min-h-screen bg-[#f7f7f9] dark:bg-[#0c0d11] text-slate-900 dark:text-slate-100">
       <header className="h-14 bg-white dark:bg-[#13151c] border-b border-slate-200 dark:border-slate-800 px-4 sm:px-8 flex items-center justify-between gap-4">
         <div className="flex items-center gap-2.5 min-w-0">
-          <span className="w-6 h-6 rounded-md bg-brand-600 text-white text-xs font-extrabold flex items-center justify-center shrink-0">
-            P
-          </span>
+          {state.store.logoImage ? (
+            <img
+              src={state.store.logoImage}
+              alt={state.store.name}
+              referrerPolicy="no-referrer"
+              className="w-7 h-7 rounded-md object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+            />
+          ) : (
+            <span className="w-6 h-6 rounded-md bg-brand-600 text-white text-xs font-extrabold flex items-center justify-center shrink-0">
+              P
+            </span>
+          )}
           <span className="text-sm font-bold text-slate-900 dark:text-white truncate">
             {state.store.name}
           </span>

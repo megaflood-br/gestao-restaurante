@@ -1,8 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Minus, Plus, X } from 'lucide-react';
+import { Minus, Navigation, Plus, X } from 'lucide-react';
 import { formatCurrencyBRL } from '@/lib/formatters';
+import { calculateDeliveryQuote } from '@/lib/delivery-pricing';
 import type {
   DeliveryMode,
   DeliveryStoreState,
@@ -40,6 +41,9 @@ export function ManualOrderModal({
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [distanceKm, setDistanceKm] = useState<number | null>(null);
+  const [calculatingDist, setCalculatingDist] = useState(false);
+  const [distanceHint, setDistanceHint] = useState<string | null>(null);
 
   const selectedItems: OrderItem[] = useMemo(() => {
     return state.menuItems
@@ -62,12 +66,14 @@ export function ManualOrderModal({
   if (!open) return null;
 
   const subtotal = selectedItems.reduce((sum, i) => sum + i.totalPrice, 0);
-  const deliveryFee =
-    deliveryMode === 'retirada'
-      ? 0
-      : subtotal >= state.store.freeDeliveryMin
-        ? 0
-        : state.store.deliveryFee;
+  const quote = calculateDeliveryQuote({
+    store: state.store,
+    subtotal,
+    deliveryMode,
+    neighborhood,
+    distanceKm,
+  });
+  const deliveryFee = quote.deliveryFee;
   const total = Number((subtotal + deliveryFee).toFixed(2));
 
   const updateQty = (itemId: string, delta: number) => {
@@ -75,6 +81,39 @@ export function ManualOrderModal({
       const next = Math.max(0, (prev[itemId] ?? 0) + delta);
       return { ...prev, [itemId]: next };
     });
+  };
+
+  const handleCalculateDistance = async () => {
+    if (!address.trim()) return;
+    setCalculatingDist(true);
+    setDistanceHint(null);
+    try {
+      const fullDest = [address.trim(), neighborhood.trim(), 'São Paulo, Brasil']
+        .filter(Boolean)
+        .join(', ');
+      const res = await fetch('/api/maps/distance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          destinationAddress: fullDest,
+          neighborhood: neighborhood.trim(),
+          subtotal,
+          deliveryMode: 'entrega',
+          storeOverride: state.store,
+        }),
+      });
+      const data = await res.json();
+      if (data?.ok && typeof data.distanceKm === 'number') {
+        setDistanceKm(data.distanceKm);
+        setDistanceHint(`${data.distanceKm.toFixed(1)} km · ${data.matchedRuleLabel}`);
+      } else {
+        setDistanceHint(data?.apiError || 'Aplicando taxa padrão.');
+      }
+    } catch {
+      setDistanceHint('Aplicando taxa padrão.');
+    } finally {
+      setCalculatingDist(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -99,6 +138,9 @@ export function ManualOrderModal({
             deliveryMode === 'retirada' ? state.store.neighborhood : neighborhood,
           deliveryMode,
           paymentMethod,
+          distanceKm:
+            deliveryMode === 'entrega' && distanceKm !== null ? distanceKm : undefined,
+          deliveryFee,
           notes,
           items: selectedItems,
         }),
@@ -247,39 +289,73 @@ export function ManualOrderModal({
             </div>
 
             {deliveryMode === 'entrega' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label
-                    htmlFor="man-addr"
-                    className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-                  >
-                    Endereço de Entrega
-                  </label>
-                  <input
-                    id="man-addr"
-                    required
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    placeholder="Rua e número"
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-                  />
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label
+                      htmlFor="man-addr"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      Endereço de Entrega
+                    </label>
+                    <input
+                      id="man-addr"
+                      required
+                      value={address}
+                      onChange={(e) => {
+                        setAddress(e.target.value);
+                        setDistanceKm(null);
+                        setDistanceHint(null);
+                      }}
+                      placeholder="Rua e número"
+                      className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="man-neigh"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      Bairro
+                    </label>
+                    <input
+                      id="man-neigh"
+                      required
+                      list="man-neighborhood-options"
+                      value={neighborhood}
+                      onChange={(e) => setNeighborhood(e.target.value)}
+                      placeholder="Bairro"
+                      className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    />
+                    {state.store.neighborhoodFees && state.store.neighborhoodFees.length > 0 && (
+                      <datalist id="man-neighborhood-options">
+                        {state.store.neighborhoodFees.map((rule) => (
+                          <option key={rule.id} value={rule.neighborhood} />
+                        ))}
+                      </datalist>
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <label
-                    htmlFor="man-neigh"
-                    className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-                  >
-                    Bairro
-                  </label>
-                  <input
-                    id="man-neigh"
-                    required
-                    value={neighborhood}
-                    onChange={(e) => setNeighborhood(e.target.value)}
-                    placeholder="Bairro"
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-                  />
-                </div>
+
+                {state.store.deliveryFeeMode === 'distancia' && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-xs">
+                    <span className="text-slate-600 dark:text-slate-300 font-mono-tabular">
+                      {distanceHint || quote.matchedRuleLabel} ·{' '}
+                      <strong>
+                        {deliveryFee === 0 ? 'Grátis' : formatCurrencyBRL(deliveryFee)}
+                      </strong>
+                    </span>
+                    <button
+                      type="button"
+                      disabled={calculatingDist || address.trim().length < 4}
+                      onClick={handleCalculateDistance}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-white bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 rounded-md disabled:opacity-50"
+                    >
+                      <Navigation className="w-3 h-3" aria-hidden="true" />
+                      <span>{calculatingDist ? 'Calculando...' : 'Calcular km'}</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

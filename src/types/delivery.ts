@@ -71,6 +71,22 @@ export interface EvolutionConfig {
   templates: EvolutionTemplates;
 }
 
+export type DeliveryFeeMode = 'fixa' | 'distancia' | 'bairro';
+
+export interface DistanceFeeTier {
+  id: string;
+  maxKm: number;
+  fee: number;
+  estimatedMinutes?: number;
+}
+
+export interface NeighborhoodFeeRule {
+  id: string;
+  neighborhood: string;
+  fee: number;
+  estimatedMinutes?: number;
+}
+
 export interface StoreSettings {
   name: string;
   segment: string;
@@ -81,9 +97,14 @@ export interface StoreSettings {
   address: string;
   neighborhood: string;
   deliveryFee: number;
+  deliveryFeeMode?: DeliveryFeeMode;
+  distanceFeeTiers?: DistanceFeeTier[];
+  neighborhoodFees?: NeighborhoodFeeRule[];
+  maxDeliveryKm?: number;
   freeDeliveryMin: number;
   estimatedMinutes: number;
   heroImage: string;
+  logoImage?: string;
   evolution: EvolutionConfig;
 }
 
@@ -200,6 +221,9 @@ export interface Order {
   couponCode?: string;
   subtotal: number;
   deliveryFee: number;
+  distanceKm?: number;
+  destinationLat?: number;
+  destinationLng?: number;
   discount: number;
   total: number;
   status: OrderStatus;

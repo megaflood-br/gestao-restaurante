@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import {
+  Bike,
   Bot,
   Check,
   CheckCircle2,
@@ -10,7 +11,10 @@ import {
   ExternalLink,
   KeyRound,
   Link2,
+  MapPin,
   MessageSquare,
+  Navigation,
+  Plus,
   Power,
   QrCode,
   Save,
@@ -19,15 +23,19 @@ import {
   Smartphone,
   Sparkles,
   Store,
+  Trash2,
   Upload,
 } from 'lucide-react';
 import { formatCurrencyBRL, formatTimeBR } from '@/lib/formatters';
 import { readAndCompressImage } from '@/lib/image-upload';
 import type {
   BotTone,
+  DeliveryFeeMode,
   DeliveryStoreState,
+  DistanceFeeTier,
   EvolutionConfig,
   EvolutionTemplates,
+  NeighborhoodFeeRule,
   StoreSettings,
 } from '@/types/delivery';
 
@@ -145,6 +153,18 @@ export function SettingsSection({
   const [address, setAddress] = useState(store.address);
   const [neighborhood, setNeighborhood] = useState(store.neighborhood);
   const [deliveryFee, setDeliveryFee] = useState(String(store.deliveryFee));
+  const [deliveryFeeMode, setDeliveryFeeMode] = useState<DeliveryFeeMode>(
+    store.deliveryFeeMode ?? 'distancia',
+  );
+  const [maxDeliveryKm, setMaxDeliveryKm] = useState(
+    String(store.maxDeliveryKm ?? 12),
+  );
+  const [distanceFeeTiers, setDistanceFeeTiers] = useState<DistanceFeeTier[]>(
+    store.distanceFeeTiers ?? [],
+  );
+  const [neighborhoodFees, setNeighborhoodFees] = useState<NeighborhoodFeeRule[]>(
+    store.neighborhoodFees ?? [],
+  );
   const [freeDeliveryMin, setFreeDeliveryMin] = useState(
     String(store.freeDeliveryMin),
   );
@@ -152,10 +172,30 @@ export function SettingsSection({
     String(store.estimatedMinutes),
   );
   const [heroImage, setHeroImage] = useState(store.heroImage);
+  const [logoImage, setLogoImage] = useState(store.logoImage ?? '');
+  const [logoImgFailed, setLogoImgFailed] = useState(false);
   const [uploadingCover, setUploadingCover] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [origin, setOrigin] = useState('');
   const [copiedCustomerLink, setCopiedCustomerLink] = useState(false);
+  const [copiedCourierLink, setCopiedCourierLink] = useState(false);
   const [savingStore, setSavingStore] = useState(false);
+
+  // Distance fee simulator state
+  const [simAddress, setSimAddress] = useState(
+    'Av. Paulista, 1000, Bela Vista, São Paulo',
+  );
+  const [simBusy, setSimBusy] = useState(false);
+  const [simResult, setSimResult] = useState<{
+    distanceKm: number | null;
+    deliveryFee: number;
+    estimatedMinutes: number;
+    matchedRuleLabel: string;
+    outOfRange: boolean;
+    usedGoogleRoutes?: boolean;
+    quotaExceeded?: boolean;
+    apiError?: string;
+  } | null>(null);
 
   // AI & Evolution config state
   const [instanceName, setInstanceName] = useState(evolution.instanceName);
@@ -211,11 +251,14 @@ export function SettingsSection({
     openAiConfigured: false,
     openAiModel: 'gpt-4o-mini',
     openAiKeyPreview: '',
+    googleMapsConfigured: false,
+    googleMapsKeyPreview: '',
   });
   const [evolutionApiUrlInput, setEvolutionApiUrlInput] = useState('');
   const [evolutionApiKeyInput, setEvolutionApiKeyInput] = useState('');
   const [openAiApiKeyInput, setOpenAiApiKeyInput] = useState('');
   const [openAiModelInput, setOpenAiModelInput] = useState('gpt-4o-mini');
+  const [googleMapsApiKeyInput, setGoogleMapsApiKeyInput] = useState('');
 
   const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -233,10 +276,16 @@ export function SettingsSection({
     setAddress(store.address);
     setNeighborhood(store.neighborhood);
     setDeliveryFee(String(store.deliveryFee));
+    setDeliveryFeeMode(store.deliveryFeeMode ?? 'distancia');
+    setMaxDeliveryKm(String(store.maxDeliveryKm ?? 12));
+    setDistanceFeeTiers(store.distanceFeeTiers ?? []);
+    setNeighborhoodFees(store.neighborhoodFees ?? []);
     setFreeDeliveryMin(String(store.freeDeliveryMin));
     setEstimatedMinutes(String(store.estimatedMinutes));
     setHeroImage(store.heroImage);
+    setLogoImage(store.logoImage ?? '');
     setHeroImgFailed(false);
+    setLogoImgFailed(false);
   }, [store]);
 
   useEffect(() => {
@@ -285,6 +334,25 @@ export function SettingsSection({
     e.preventDefault();
     setSavingStore(true);
     setFeedback(null);
+    const cleanedTiers = [...distanceFeeTiers]
+      .filter((t) => Number(t.maxKm) > 0)
+      .map((t) => ({
+        ...t,
+        maxKm: Number(t.maxKm),
+        fee: Math.max(0, Number(t.fee) || 0),
+        estimatedMinutes: Math.max(5, Number(t.estimatedMinutes) || 30),
+      }))
+      .sort((a, b) => a.maxKm - b.maxKm);
+
+    const cleanedNeighborhoods = neighborhoodFees
+      .filter((n) => n.neighborhood.trim().length > 0)
+      .map((n) => ({
+        ...n,
+        neighborhood: n.neighborhood.trim(),
+        fee: Math.max(0, Number(n.fee) || 0),
+        estimatedMinutes: Math.max(5, Number(n.estimatedMinutes) || 30),
+      }));
+
     try {
       await onUpdateStore({
         name: name.trim() || store.name,
@@ -295,13 +363,20 @@ export function SettingsSection({
         address: address.trim(),
         neighborhood: neighborhood.trim(),
         deliveryFee: Math.max(0, Number(deliveryFee) || 0),
+        deliveryFeeMode,
+        maxDeliveryKm: Math.max(1, Number(maxDeliveryKm) || 12),
+        distanceFeeTiers: cleanedTiers,
+        neighborhoodFees: cleanedNeighborhoods,
         freeDeliveryMin: Math.max(0, Number(freeDeliveryMin) || 0),
         estimatedMinutes: Math.max(5, Number(estimatedMinutes) || 30),
         heroImage: heroImage.trim() || COVER_PRESETS[0].url,
+        logoImage: logoImage.trim(),
       });
+      setDistanceFeeTiers(cleanedTiers);
+      setNeighborhoodFees(cleanedNeighborhoods);
       setFeedback({
         type: 'ok',
-        message: 'Dados da loja, capa do cardápio e regras de entrega salvos com sucesso.',
+        message: 'Logo, dados da loja, capa do cardápio e tabela de taxas salvos com sucesso.',
       });
     } finally {
       setSavingStore(false);
@@ -342,6 +417,117 @@ export function SettingsSection({
     }
   };
 
+  const handleLogoFileUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadingLogo(true);
+    setFeedback(null);
+    try {
+      const dataUrl = await readAndCompressImage(file, {
+        maxWidth: 400,
+        maxHeight: 400,
+        quality: 0.88,
+      });
+      setLogoImage(dataUrl);
+      setLogoImgFailed(false);
+      await onUpdateStore({ logoImage: dataUrl });
+      setFeedback({
+        type: 'ok',
+        message: 'Logo da empresa atualizado em todo o sistema.',
+      });
+    } catch (err) {
+      setFeedback({
+        type: 'error',
+        message:
+          err instanceof Error
+            ? err.message
+            : 'Não foi possível processar a imagem do logo.',
+      });
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
+
+  const handleAddDistanceTier = () => {
+    const lastMax = distanceFeeTiers.reduce(
+      (max, t) => Math.max(max, Number(t.maxKm) || 0),
+      0,
+    );
+    const lastFee =
+      distanceFeeTiers.length > 0
+        ? distanceFeeTiers[distanceFeeTiers.length - 1].fee
+        : Number(deliveryFee) || 5;
+    setDistanceFeeTiers((prev) => [
+      ...prev,
+      {
+        id: `dist-${Date.now()}`,
+        maxKm: lastMax + 3,
+        fee: Number((lastFee + 3).toFixed(2)),
+        estimatedMinutes: 40,
+      },
+    ]);
+  };
+
+  const handleAddNeighborhoodRule = () => {
+    setNeighborhoodFees((prev) => [
+      ...prev,
+      {
+        id: `nb-${Date.now()}`,
+        neighborhood: '',
+        fee: Number(deliveryFee) || 7.5,
+        estimatedMinutes: Number(estimatedMinutes) || 35,
+      },
+    ]);
+  };
+
+  const handleSimulateDistanceFee = async () => {
+    if (!simAddress.trim()) return;
+    setSimBusy(true);
+    setSimResult(null);
+    try {
+      const res = await fetch('/api/maps/distance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          originAddress: `${address}, ${neighborhood}, Brasil`,
+          destinationAddress: simAddress.trim(),
+          subtotal: 35,
+          deliveryMode: 'entrega',
+          storeOverride: {
+            ...store,
+            deliveryFee: Math.max(0, Number(deliveryFee) || 0),
+            deliveryFeeMode,
+            maxDeliveryKm: Math.max(1, Number(maxDeliveryKm) || 12),
+            distanceFeeTiers,
+            neighborhoodFees,
+            freeDeliveryMin: Math.max(0, Number(freeDeliveryMin) || 0),
+            estimatedMinutes: Math.max(5, Number(estimatedMinutes) || 30),
+          },
+        }),
+      });
+      const data = await res.json();
+      if (data?.ok) {
+        setSimResult({
+          distanceKm: data.distanceKm ?? null,
+          deliveryFee: data.deliveryFee ?? 0,
+          estimatedMinutes: data.routeDurationMinutes ?? data.estimatedMinutes ?? 35,
+          matchedRuleLabel: data.matchedRuleLabel ?? '',
+          outOfRange: Boolean(data.outOfRange),
+          usedGoogleRoutes: Boolean(data.usedGoogleRoutes),
+          quotaExceeded: Boolean(data.quotaExceeded),
+          apiError: data.apiError,
+        });
+      }
+    } catch {
+      // Ignore network errors
+    } finally {
+      setSimBusy(false);
+    }
+  };
+
   const handleSelectCoverPreset = async (url: string) => {
     setHeroImage(url);
     setHeroImgFailed(false);
@@ -353,6 +539,7 @@ export function SettingsSection({
   };
 
   const customerMenuUrl = origin ? `${origin}/cardapio` : '/cardapio';
+  const courierPortalUrl = origin ? `${origin}/motoboy` : '/motoboy';
 
   const handleCopyCustomerLink = async () => {
     try {
@@ -361,6 +548,16 @@ export function SettingsSection({
       setTimeout(() => setCopiedCustomerLink(false), 2500);
     } catch {
       // Fallback ignored in restricted frames
+    }
+  };
+
+  const handleCopyCourierLink = async () => {
+    try {
+      await navigator.clipboard.writeText(courierPortalUrl);
+      setCopiedCourierLink(true);
+      setTimeout(() => setCopiedCourierLink(false), 2500);
+    } catch {
+      // Fallback ignored
     }
   };
 
@@ -495,7 +692,11 @@ export function SettingsSection({
 
   const handleSaveApiCredentials = async (
     e?: React.FormEvent,
-    clearFlags?: { clearEvolutionKey?: boolean; clearOpenAiKey?: boolean },
+    clearFlags?: {
+      clearEvolutionKey?: boolean;
+      clearOpenAiKey?: boolean;
+      clearGoogleMapsKey?: boolean;
+    },
   ) => {
     e?.preventDefault();
     setBusyAction('save_api_credentials');
@@ -510,8 +711,10 @@ export function SettingsSection({
           evolutionApiKey: evolutionApiKeyInput,
           openAiApiKey: openAiApiKeyInput,
           openAiModel: openAiModelInput,
+          googleMapsApiKey: googleMapsApiKeyInput,
           clearEvolutionKey: clearFlags?.clearEvolutionKey,
           clearOpenAiKey: clearFlags?.clearOpenAiKey,
+          clearGoogleMapsKey: clearFlags?.clearGoogleMapsKey,
         }),
       });
       const data = (await res.json()) as {
@@ -523,6 +726,7 @@ export function SettingsSection({
         setEnvStatus(data.envStatus);
         setEvolutionApiKeyInput('');
         setOpenAiApiKeyInput('');
+        setGoogleMapsApiKeyInput('');
         setFeedback({
           type: 'ok',
           message: 'Credenciais salvas com segurança no servidor do painel.',
@@ -792,7 +996,7 @@ export function SettingsSection({
                         htmlFor="cfg-store-fee"
                         className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
                       >
-                        Taxa de Entrega (R$)
+                        Taxa Padrão / Fallback (R$)
                       </label>
                       <input
                         id="cfg-store-fee"
@@ -835,6 +1039,387 @@ export function SettingsSection({
                         value={estimatedMinutes}
                         onChange={(e) => setEstimatedMinutes(e.target.value)}
                         className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Delivery Fee Mode & Dynamic Tiers */}
+                  <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-4">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                        Regra de Cobrança da Taxa de Entrega
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Escolha como o frete é calculado no cardápio do cliente e nos pedidos do balcão.
+                      </p>
+                      <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {(
+                          [
+                            {
+                              id: 'distancia' as const,
+                              label: 'Por Distância (km)',
+                              desc: 'Google Maps calcula a rota',
+                            },
+                            {
+                              id: 'bairro' as const,
+                              label: 'Por Bairro / Região',
+                              desc: 'Tabela por nome do bairro',
+                            },
+                            {
+                              id: 'fixa' as const,
+                              label: 'Taxa Fixa Única',
+                              desc: 'Valor único p/ qualquer local',
+                            },
+                          ] as const
+                        ).map((opt) => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => setDeliveryFeeMode(opt.id)}
+                            className={`p-3 text-left rounded-lg border transition-colors ${
+                              deliveryFeeMode === opt.id
+                                ? 'bg-brand-50 dark:bg-brand-950/50 border-brand-600 text-brand-900 dark:text-brand-200'
+                                : 'bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+                            }`}
+                          >
+                            <p className="text-xs font-bold">{opt.label}</p>
+                            <p className="text-[11px] opacity-80 mt-0.5">{opt.desc}</p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {deliveryFeeMode === 'distancia' && (
+                      <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+                          <div className="w-full sm:w-52">
+                            <label
+                              htmlFor="cfg-max-km"
+                              className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                            >
+                              Raio Máximo de Entrega (km)
+                            </label>
+                            <input
+                              id="cfg-max-km"
+                              type="number"
+                              min="1"
+                              step="0.5"
+                              value={maxDeliveryKm}
+                              onChange={(e) => setMaxDeliveryKm(e.target.value)}
+                              className="w-full px-3 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleAddDistanceTier}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-slate-900 border border-brand-200 dark:border-brand-800 hover:bg-brand-50 rounded-lg whitespace-nowrap self-start sm:self-auto"
+                          >
+                            <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Adicionar Faixa de km</span>
+                          </button>
+                        </div>
+
+                        <div className="space-y-2">
+                          {distanceFeeTiers.map((tier, idx) => (
+                            <div
+                              key={tier.id}
+                              className="grid grid-cols-12 gap-2 items-center"
+                            >
+                              <div className="col-span-4">
+                                <label className="block text-[10px] text-slate-500 mb-0.5">
+                                  Até (km)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0.5"
+                                  step="0.5"
+                                  value={tier.maxKm}
+                                  onChange={(e) => {
+                                    const val = Number(e.target.value) || 0;
+                                    setDistanceFeeTiers((prev) =>
+                                      prev.map((item, i) =>
+                                        i === idx ? { ...item, maxKm: val } : item,
+                                      ),
+                                    );
+                                  }}
+                                  className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                                />
+                              </div>
+                              <div className="col-span-4">
+                                <label className="block text-[10px] text-slate-500 mb-0.5">
+                                  Valor (R$)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.5"
+                                  value={tier.fee}
+                                  onChange={(e) => {
+                                    const val = Number(e.target.value) || 0;
+                                    setDistanceFeeTiers((prev) =>
+                                      prev.map((item, i) =>
+                                        i === idx ? { ...item, fee: val } : item,
+                                      ),
+                                    );
+                                  }}
+                                  className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                                />
+                              </div>
+                              <div className="col-span-3">
+                                <label className="block text-[10px] text-slate-500 mb-0.5">
+                                  Prazo (min)
+                                </label>
+                                <input
+                                  type="number"
+                                  min="5"
+                                  step="5"
+                                  value={tier.estimatedMinutes ?? 35}
+                                  onChange={(e) => {
+                                    const val = Number(e.target.value) || 35;
+                                    setDistanceFeeTiers((prev) =>
+                                      prev.map((item, i) =>
+                                        i === idx
+                                          ? { ...item, estimatedMinutes: val }
+                                          : item,
+                                      ),
+                                    );
+                                  }}
+                                  className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                                />
+                              </div>
+                              <div className="col-span-1 pt-4 flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setDistanceFeeTiers((prev) =>
+                                      prev.filter((_, i) => i !== idx),
+                                    )
+                                  }
+                                  aria-label="Remover faixa de distância"
+                                  className="p-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Live Google Maps Distance Simulator */}
+                        <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                          <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                            <Navigation className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                            <span>Simulador de Frete por Endereço (Google Maps)</span>
+                          </p>
+                          <div className="flex flex-col sm:flex-row gap-2">
+                            <input
+                              type="text"
+                              value={simAddress}
+                              onChange={(e) => setSimAddress(e.target.value)}
+                              placeholder="Digite um endereço de cliente para simular..."
+                              className="flex-1 px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                            />
+                            <button
+                              type="button"
+                              disabled={simBusy}
+                              onClick={handleSimulateDistanceFee}
+                              className="px-3.5 py-1.5 text-xs font-semibold text-white bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 rounded-lg whitespace-nowrap disabled:opacity-60"
+                            >
+                              {simBusy ? 'Calculando...' : 'Simular Frete'}
+                            </button>
+                          </div>
+
+                          {simResult && (
+                            <div
+                              className={`p-2.5 rounded-lg border text-xs ${
+                                simResult.outOfRange || simResult.quotaExceeded
+                                  ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-300'
+                                  : 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+                              }`}
+                            >
+                              {simResult.distanceKm !== null ? (
+                                <p className="font-mono-tabular">
+                                  Distância: <strong>{simResult.distanceKm.toFixed(1)} km</strong> ·{' '}
+                                  ~{simResult.estimatedMinutes} min ·{' '}
+                                  {simResult.matchedRuleLabel} · Taxa:{' '}
+                                  <strong>{formatCurrencyBRL(simResult.deliveryFee)}</strong>
+                                </p>
+                              ) : (
+                                <p>
+                                  {simResult.apiError ||
+                                    'Não foi possível medir a rota exata. Aplicada taxa padrão:'}{' '}
+                                  <strong className="font-mono-tabular">
+                                    {formatCurrencyBRL(simResult.deliveryFee)}
+                                  </strong>
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {deliveryFeeMode === 'bairro' && (
+                      <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                            <MapPin className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                            <span>Tabela de Taxas por Bairro</span>
+                          </p>
+                          <button
+                            type="button"
+                            onClick={handleAddNeighborhoodRule}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-slate-900 border border-brand-200 dark:border-brand-800 hover:bg-brand-50 rounded-lg whitespace-nowrap"
+                          >
+                            <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Adicionar Bairro</span>
+                          </button>
+                        </div>
+
+                        <div className="space-y-2">
+                          {neighborhoodFees.map((rule, idx) => (
+                            <div
+                              key={rule.id}
+                              className="grid grid-cols-12 gap-2 items-center"
+                            >
+                              <div className="col-span-5">
+                                <input
+                                  type="text"
+                                  value={rule.neighborhood}
+                                  placeholder="Nome do bairro"
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setNeighborhoodFees((prev) =>
+                                      prev.map((item, i) =>
+                                        i === idx ? { ...item, neighborhood: val } : item,
+                                      ),
+                                    );
+                                  }}
+                                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                                />
+                              </div>
+                              <div className="col-span-3">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.5"
+                                  value={rule.fee}
+                                  aria-label="Taxa do bairro"
+                                  onChange={(e) => {
+                                    const val = Number(e.target.value) || 0;
+                                    setNeighborhoodFees((prev) =>
+                                      prev.map((item, i) =>
+                                        i === idx ? { ...item, fee: val } : item,
+                                      ),
+                                    );
+                                  }}
+                                  className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                                />
+                              </div>
+                              <div className="col-span-3">
+                                <input
+                                  type="number"
+                                  min="5"
+                                  step="5"
+                                  value={rule.estimatedMinutes ?? 35}
+                                  aria-label="Prazo em minutos"
+                                  onChange={(e) => {
+                                    const val = Number(e.target.value) || 35;
+                                    setNeighborhoodFees((prev) =>
+                                      prev.map((item, i) =>
+                                        i === idx
+                                          ? { ...item, estimatedMinutes: val }
+                                          : item,
+                                      ),
+                                    );
+                                  }}
+                                  className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                                />
+                              </div>
+                              <div className="col-span-1 flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setNeighborhoodFees((prev) =>
+                                      prev.filter((_, i) => i !== idx),
+                                    )
+                                  }
+                                  aria-label="Remover bairro"
+                                  className="p-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Company Logo Configuration */}
+                  <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                          Logo da Empresa
+                        </p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Exibido no painel administrativo, no cardápio digital do cliente e no portal do motoboy.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {logoImage.trim() && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              setLogoImage('');
+                              setLogoImgFailed(false);
+                              await onUpdateStore({ logoImage: '' });
+                            }}
+                            className="px-2.5 py-1.5 text-xs font-medium text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
+                          >
+                            Remover
+                          </button>
+                        )}
+                        <label className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-950/50 border border-brand-200 dark:border-brand-800 hover:bg-brand-100 dark:hover:bg-brand-900/50 rounded-lg cursor-pointer whitespace-nowrap">
+                          <Upload className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>{uploadingLogo ? 'Enviando...' : 'Enviar Logo'}</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleLogoFileUpload}
+                            className="sr-only"
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0">
+                        {logoImage.trim() && !logoImgFailed ? (
+                          <img
+                            src={logoImage}
+                            alt={`Logo ${name}`}
+                            referrerPolicy="no-referrer"
+                            onError={() => setLogoImgFailed(true)}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <span className="text-sm font-extrabold text-brand-600 dark:text-brand-400">
+                            {(name || 'P').trim().charAt(0).toUpperCase()}
+                          </span>
+                        )}
+                      </div>
+                      <input
+                        id="cfg-store-logo"
+                        value={logoImage}
+                        onChange={(e) => {
+                          setLogoImage(e.target.value);
+                          setLogoImgFailed(false);
+                        }}
+                        placeholder="Ou cole a URL do logo (https://...)"
+                        className="flex-1 px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
                       />
                     </div>
                   </div>
@@ -944,19 +1529,40 @@ export function SettingsSection({
                     )}
                   </div>
                   <div className="p-5 space-y-3">
-                    <div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        {store.segment} · {store.neighborhood}
-                      </p>
-                      <h3 className="mt-0.5 text-base font-bold text-slate-900 dark:text-white">
-                        {store.name}
-                      </h3>
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg overflow-hidden bg-brand-600 text-white flex items-center justify-center shrink-0">
+                        {logoImage.trim() && !logoImgFailed ? (
+                          <img
+                            src={logoImage}
+                            alt={store.name}
+                            referrerPolicy="no-referrer"
+                            onError={() => setLogoImgFailed(true)}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <span className="text-sm font-extrabold">
+                            {(name || 'P').trim().charAt(0).toUpperCase()}
+                          </span>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                          {store.segment} · {store.neighborhood}
+                        </p>
+                        <h3 className="mt-0.5 text-base font-bold text-slate-900 dark:text-white truncate">
+                          {store.name}
+                        </h3>
+                      </div>
                     </div>
                     <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-1.5 text-xs">
                       <div className="flex justify-between">
-                        <span className="text-slate-500">Taxa padrão</span>
-                        <span className="font-mono-tabular font-semibold text-slate-900 dark:text-white">
-                          {formatCurrencyBRL(store.deliveryFee)}
+                        <span className="text-slate-500">Cobrança de frete</span>
+                        <span className="font-semibold text-slate-900 dark:text-white">
+                          {deliveryFeeMode === 'distancia'
+                            ? `Por distância (até ${maxDeliveryKm} km)`
+                            : deliveryFeeMode === 'bairro'
+                              ? `Por bairro (${neighborhoodFees.length})`
+                              : `Fixa (${formatCurrencyBRL(store.deliveryFee)})`}
                         </span>
                       </div>
                       <div className="flex justify-between">
@@ -1038,6 +1644,56 @@ export function SettingsSection({
                       <span>Compartilhar WhatsApp</span>
                     </a>
                   </div>
+                </section>
+
+                <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3.5">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <Bike className="w-4 h-4 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                      <span>Portal Exclusivo do Motoboy (GPS)</span>
+                    </h3>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Link exclusivo para os entregadores verem os pedidos da rota, traçar trajeto GPS e marcar entrega concluída no celular.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={courierPortalUrl}
+                      onFocus={(e) => e.currentTarget.select()}
+                      aria-label="Link exclusivo do portal do motoboy"
+                      className="flex-1 min-w-0 px-3 py-2 text-xs font-mono-tabular bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-800 dark:text-slate-200"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCopyCourierLink}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 rounded-lg whitespace-nowrap shrink-0"
+                    >
+                      {copiedCourierLink ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>Copiado</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>Copiar</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <a
+                    href="/motoboy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-950/50 border border-brand-200 dark:border-brand-800 hover:bg-brand-100 rounded-lg whitespace-nowrap"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Abrir Portal do Motoboy</span>
+                  </a>
                 </section>
               </div>
             </div>
@@ -1691,20 +2347,20 @@ export function SettingsSection({
             </div>
           )}
 
-          {/* TAB 4: CREDENCIAIS & APIS (OPENAI & EVOLUTION API) */}
+          {/* TAB 4: CREDENCIAIS & APIS (OPENAI, EVOLUTION API & GOOGLE MAPS) */}
           {activeTab === 'apis' && (
             <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-5">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
                     <KeyRound className="w-4 h-4 text-brand-600 dark:text-brand-400" aria-hidden="true" />
-                    <span>Credenciais de APIs (OpenAI & Evolution API v2)</span>
+                    <span>Credenciais de APIs (OpenAI, Evolution & Google Maps)</span>
                   </h2>
                   <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                     Configure suas chaves diretamente pelo painel administrativo. Elas ficam armazenadas apenas no servidor, sem precisar editar arquivos .env.
                   </p>
                 </div>
-                <div className="flex items-center gap-3 text-xs shrink-0">
+                <div className="flex flex-wrap items-center gap-2.5 text-xs shrink-0">
                   <span
                     className={`font-semibold ${
                       envStatus.openAiConfigured
@@ -1723,6 +2379,16 @@ export function SettingsSection({
                     }`}
                   >
                     Evolution: {envStatus.evolutionConfigured ? 'Configurada' : 'Simulador'}
+                  </span>
+                  <span className="text-slate-300 dark:text-slate-700">·</span>
+                  <span
+                    className={`font-semibold ${
+                      envStatus.googleMapsConfigured
+                        ? 'text-emerald-700 dark:text-emerald-400'
+                        : 'text-slate-500'
+                    }`}
+                  >
+                    Maps: {envStatus.googleMapsConfigured ? 'Ativo' : 'Pendente'}
                   </span>
                 </div>
               </div>
@@ -1879,6 +2545,54 @@ export function SettingsSection({
                         className="px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
                       >
                         Remover chave
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Google Maps Platform Card */}
+                <div className="lg:col-span-2 p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-xs font-bold text-slate-900 dark:text-white">
+                        Google Maps Platform (Cálculo de Distância & GPS do Motoboy)
+                      </h3>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Uma chave de demonstração já está ativa para cálculo de rotas e mapa GPS. Caso deseje usar sua própria chave Google Cloud, informe abaixo.
+                      </p>
+                    </div>
+                    {envStatus.googleMapsConfigured && (
+                      <span className="text-[11px] font-mono-tabular text-emerald-700 dark:text-emerald-400">
+                        Ativa: {envStatus.googleMapsKeyPreview}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      id="cfg-gmaps-key"
+                      type="password"
+                      value={googleMapsApiKeyInput}
+                      onChange={(e) => setGoogleMapsApiKeyInput(e.target.value)}
+                      placeholder={
+                        envStatus.googleMapsConfigured
+                          ? `Chave em uso (${envStatus.googleMapsKeyPreview}) — opcional: cole sua chave própria`
+                          : 'AIza...'
+                      }
+                      className="flex-1 px-3 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    />
+                    {envStatus.googleMapsKeyPreview && (
+                      <button
+                        type="button"
+                        disabled={busyAction !== null}
+                        onClick={() =>
+                          handleSaveApiCredentials(undefined, {
+                            clearGoogleMapsKey: true,
+                          })
+                        }
+                        className="px-3 py-2 text-xs font-medium text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg whitespace-nowrap"
+                      >
+                        Voltar p/ Chave Padrão
                       </button>
                     )}
                   </div>

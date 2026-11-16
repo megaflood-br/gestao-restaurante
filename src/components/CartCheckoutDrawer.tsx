@@ -5,7 +5,9 @@ import {
   CheckCircle2,
   Copy,
   CreditCard,
+  MapPin,
   Minus,
+  Navigation,
   Plus,
   QrCode,
   ShoppingBag,
@@ -18,6 +20,7 @@ import {
   ORDER_STATUS_META,
   PAYMENT_METHOD_LABEL,
 } from '@/lib/formatters';
+import { calculateDeliveryQuote } from '@/lib/delivery-pricing';
 import type {
   Coupon,
   DeliveryMode,
@@ -89,6 +92,17 @@ export function CartCheckoutDrawer({
   const [confirmedOrder, setConfirmedOrder] = useState<Order | null>(null);
   const [copiedPix, setCopiedPix] = useState(false);
 
+  // Distance-based delivery quote state
+  const [calculatedDistanceKm, setCalculatedDistanceKm] = useState<number | null>(
+    null,
+  );
+  const [calculatedDurationMin, setCalculatedDurationMin] = useState<
+    number | null
+  >(null);
+  const [calculatingDistance, setCalculatingDistance] = useState(false);
+  const [distanceNote, setDistanceNote] = useState<string | null>(null);
+  const [distanceOutOfRange, setDistanceOutOfRange] = useState(false);
+
   const subtotal = useMemo(
     () => Number(cart.reduce((sum, item) => sum + item.totalPrice, 0).toFixed(2)),
     [cart],
@@ -102,12 +116,19 @@ export function CartCheckoutDrawer({
     return Math.min(subtotal, appliedCoupon.value);
   }, [appliedCoupon, subtotal]);
 
-  const deliveryFee =
-    deliveryMode === 'retirada'
-      ? 0
-      : subtotal >= store.freeDeliveryMin
-        ? 0
-        : store.deliveryFee;
+  const quote = useMemo(
+    () =>
+      calculateDeliveryQuote({
+        store,
+        subtotal,
+        deliveryMode,
+        neighborhood,
+        distanceKm: calculatedDistanceKm,
+      }),
+    [store, subtotal, deliveryMode, neighborhood, calculatedDistanceKm],
+  );
+
+  const deliveryFee = quote.deliveryFee;
 
   const total = Math.max(0, Number((subtotal + deliveryFee - discount).toFixed(2)));
   const changeAmount =
@@ -116,6 +137,52 @@ export function CartCheckoutDrawer({
       : 0;
 
   if (!open) return null;
+
+  const handleCalculateDistanceFee = async () => {
+    if (!address.trim()) return;
+    setCalculatingDistance(true);
+    setDistanceNote(null);
+    setDistanceOutOfRange(false);
+    try {
+      const fullDest = [address.trim(), neighborhood.trim(), 'São Paulo, Brasil']
+        .filter(Boolean)
+        .join(', ');
+      const res = await fetch('/api/maps/distance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          destinationAddress: fullDest,
+          neighborhood: neighborhood.trim(),
+          subtotal,
+          deliveryMode: 'entrega',
+          storeOverride: store,
+        }),
+      });
+      const data = await res.json();
+      if (data?.ok) {
+        if (typeof data.distanceKm === 'number') {
+          setCalculatedDistanceKm(data.distanceKm);
+          setCalculatedDurationMin(data.routeDurationMinutes ?? data.estimatedMinutes ?? null);
+          setDistanceOutOfRange(Boolean(data.outOfRange));
+          setDistanceNote(
+            data.outOfRange
+              ? `${data.distanceKm.toFixed(1)} km — acima do raio máximo (${store.maxDeliveryKm ?? 12} km).`
+              : `${data.distanceKm.toFixed(1)} km (~${data.routeDurationMinutes ?? data.estimatedMinutes} min) · ${data.matchedRuleLabel}`,
+          );
+        } else {
+          setCalculatedDistanceKm(null);
+          setDistanceNote(
+            data.apiError ||
+              'Não foi possível obter a distância exata; aplicando taxa padrão.',
+          );
+        }
+      }
+    } catch {
+      setDistanceNote('Falha ao consultar distância. Aplicando taxa padrão.');
+    } finally {
+      setCalculatingDistance(false);
+    }
+  };
 
   const handleApplyCoupon = () => {
     setCouponError('');
@@ -180,6 +247,11 @@ export function CartCheckoutDrawer({
               ? Number(changeFor)
               : undefined,
           couponCode: appliedCoupon?.code,
+          distanceKm:
+            deliveryMode === 'entrega' && calculatedDistanceKm !== null
+              ? calculatedDistanceKm
+              : undefined,
+          deliveryFee,
           notes: extraNoteParts.join(' · ') || undefined,
           items: cart,
         }),
@@ -407,7 +479,7 @@ export function CartCheckoutDrawer({
                     </div>
                   )}
                   <div className="flex justify-between text-slate-600 dark:text-slate-400">
-                    <span>Entrega estimada</span>
+                    <span>{quote.matchedRuleLabel}</span>
                     <span className="font-mono-tabular">
                       {deliveryFee === 0 ? 'Grátis' : formatCurrencyBRL(deliveryFee)}
                     </span>
@@ -450,7 +522,7 @@ export function CartCheckoutDrawer({
                         : 'text-slate-600 dark:text-slate-400'
                     }`}
                   >
-                    Entrega ({subtotal >= store.freeDeliveryMin ? 'Grátis' : formatCurrencyBRL(store.deliveryFee)})
+                    Entrega ({deliveryFee === 0 ? 'Grátis' : formatCurrencyBRL(deliveryFee)})
                   </button>
                   <button
                     type="button"
@@ -515,7 +587,11 @@ export function CartCheckoutDrawer({
                       id="chk-address"
                       required
                       value={address}
-                      onChange={(e) => setAddress(e.target.value)}
+                      onChange={(e) => {
+                        setAddress(e.target.value);
+                        setCalculatedDistanceKm(null);
+                        setDistanceNote(null);
+                      }}
                       placeholder="Rua, Avenida e número"
                       className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
                     />
@@ -531,11 +607,23 @@ export function CartCheckoutDrawer({
                       <input
                         id="chk-neighborhood"
                         required
+                        list="chk-neighborhood-options"
                         value={neighborhood}
-                        onChange={(e) => setNeighborhood(e.target.value)}
+                        onChange={(e) => {
+                          setNeighborhood(e.target.value);
+                          setCalculatedDistanceKm(null);
+                          setDistanceNote(null);
+                        }}
                         placeholder="Ex.: Vila Mariana"
                         className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
                       />
+                      {store.neighborhoodFees && store.neighborhoodFees.length > 0 && (
+                        <datalist id="chk-neighborhood-options">
+                          {store.neighborhoodFees.map((rule) => (
+                            <option key={rule.id} value={rule.neighborhood} />
+                          ))}
+                        </datalist>
+                      )}
                     </div>
                     <div>
                       <label
@@ -553,6 +641,56 @@ export function CartCheckoutDrawer({
                       />
                     </div>
                   </div>
+
+                  {/* Dynamic Distance / Neighborhood Fee Feedback */}
+                  {store.deliveryFeeMode === 'distancia' && (
+                    <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                          <Navigation className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                          <span>Frete calculado pela distância</span>
+                        </span>
+                        <button
+                          type="button"
+                          disabled={calculatingDistance || address.trim().length < 4}
+                          onClick={handleCalculateDistanceFee}
+                          className="px-3 py-1 text-xs font-semibold text-white bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 rounded-md disabled:opacity-50 whitespace-nowrap"
+                        >
+                          {calculatingDistance ? 'Calculando...' : 'Calcular Frete'}
+                        </button>
+                      </div>
+                      {distanceNote ? (
+                        <p
+                          className={`text-xs font-mono-tabular ${
+                            distanceOutOfRange
+                              ? 'text-amber-700 dark:text-amber-400 font-semibold'
+                              : 'text-emerald-700 dark:text-emerald-400 font-medium'
+                          }`}
+                        >
+                          {distanceNote} ·{' '}
+                          <strong>
+                            {deliveryFee === 0 ? 'Grátis' : formatCurrencyBRL(deliveryFee)}
+                          </strong>
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Informe seu endereço e toque em Calcular Frete para obter a taxa exata em km ({calculatedDurationMin ? `~${calculatedDurationMin} min` : `taxa base ${formatCurrencyBRL(deliveryFee)}`}).
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {store.deliveryFeeMode === 'bairro' && (
+                    <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+                      <span className="text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                        <span>{quote.matchedRuleLabel}</span>
+                      </span>
+                      <strong className="font-mono-tabular text-slate-900 dark:text-white">
+                        {deliveryFee === 0 ? 'Grátis' : formatCurrencyBRL(deliveryFee)}
+                      </strong>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg text-xs text-slate-600 dark:text-slate-300">

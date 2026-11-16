@@ -7,6 +7,7 @@ import {
   Check,
   CheckCircle2,
   Copy,
+  ExternalLink,
   MessageSquare,
   Printer,
   Receipt,
@@ -511,6 +512,41 @@ export function CourierProfileView({
             <option value="em_rota">Em Rota</option>
             <option value="offline">Offline</option>
           </select>
+
+          <a
+            href={`/motoboy?id=${courier.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-950/50 border border-brand-200 dark:border-brand-800 hover:bg-brand-100 rounded-lg whitespace-nowrap"
+          >
+            <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+            <span>Portal GPS do Motoboy</span>
+          </a>
+
+          <button
+            type="button"
+            onClick={() =>
+              handleCopyText(
+                'portal-link',
+                typeof window !== 'undefined'
+                  ? `${window.location.origin}/motoboy?id=${courier.id}`
+                  : `/motoboy?id=${courier.id}`,
+              )
+            }
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg whitespace-nowrap"
+          >
+            {copiedKey === 'portal-link' ? (
+              <>
+                <Check className="w-3.5 h-3.5 text-emerald-600" aria-hidden="true" />
+                <span>Link Copiado</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Copiar Acesso GPS</span>
+              </>
+            )}
+          </button>
 
           <button
             type="button"

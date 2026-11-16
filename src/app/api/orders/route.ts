@@ -9,6 +9,7 @@ import {
   applyOrderStockDeduction,
   reverseOrderStockDeduction,
 } from '@/lib/stock-engine';
+import { calculateDeliveryQuote } from '@/lib/delivery-pricing';
 import { formatCurrencyBRL } from '@/lib/formatters';
 import type {
   DeliveryMode,
@@ -30,6 +31,8 @@ interface CreateOrderPayload {
   paymentMethod: PaymentMethod;
   changeFor?: number;
   couponCode?: string;
+  distanceKm?: number;
+  deliveryFee?: number;
   notes?: string;
   items: OrderItem[];
 }
@@ -92,12 +95,21 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const quote = calculateDeliveryQuote({
+      store: db.store,
+      subtotal,
+      deliveryMode: body.deliveryMode,
+      neighborhood: body.neighborhood,
+      distanceKm: body.distanceKm,
+    });
+
     const deliveryFee =
-      body.deliveryMode === 'retirada'
-        ? 0
-        : subtotal >= db.store.freeDeliveryMin
-          ? 0
-          : db.store.deliveryFee;
+      typeof body.deliveryFee === 'number' &&
+      Number.isFinite(body.deliveryFee) &&
+      body.deliveryFee >= 0 &&
+      body.deliveryMode === 'entrega'
+        ? Number(body.deliveryFee.toFixed(2))
+        : quote.deliveryFee;
 
     const total = Math.max(0, Number((subtotal + deliveryFee - discount).toFixed(2)));
     const maxOrderNum = db.orders.reduce(
@@ -128,6 +140,10 @@ export async function POST(request: NextRequest) {
       couponCode: appliedCoupon,
       subtotal: Number(subtotal.toFixed(2)),
       deliveryFee,
+      distanceKm:
+        typeof body.distanceKm === 'number' && Number.isFinite(body.distanceKm)
+          ? Number(body.distanceKm.toFixed(2))
+          : undefined,
       discount,
       total,
       status: 'pendente',

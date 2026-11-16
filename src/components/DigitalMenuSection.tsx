@@ -128,32 +128,48 @@ export function DigitalMenuSection({
           <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/45 to-black/15" />
 
           <div className="absolute inset-x-0 bottom-0 p-5 sm:p-7 flex flex-col md:flex-row md:items-end justify-between gap-4 text-white">
-            <div className="space-y-1.5 max-w-2xl">
-              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-200">
-                <span className="inline-flex items-center gap-1.5 font-medium">
-                  <Store className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>
-                    {state.store.isOpen ? 'Aberto agora' : 'Loja fechada'}
+            <div className="flex items-end gap-3.5 max-w-2xl">
+              {state.store.logoImage && !failedImages[state.store.logoImage] && (
+                <img
+                  src={state.store.logoImage}
+                  alt={state.store.name}
+                  referrerPolicy="no-referrer"
+                  onError={() =>
+                    setFailedImages((prev) => ({
+                      ...prev,
+                      [state.store.logoImage ?? '']: true,
+                    }))
+                  }
+                  className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl object-cover border-2 border-white/80 shadow-sm shrink-0 bg-white"
+                />
+              )}
+              <div className="space-y-1.5 min-w-0">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-200">
+                  <span className="inline-flex items-center gap-1.5 font-medium">
+                    <Store className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>
+                      {state.store.isOpen ? 'Aberto agora' : 'Loja fechada'}
+                    </span>
                   </span>
-                </span>
-                <span aria-hidden="true">·</span>
-                <span>{state.store.openingHours}</span>
-                <span aria-hidden="true">·</span>
-                <span className="inline-flex items-center gap-1 font-mono-tabular">
-                  <Clock className="w-3.5 h-3.5" aria-hidden="true" />
-                  <span>~{state.store.estimatedMinutes} min</span>
-                </span>
+                  <span aria-hidden="true">·</span>
+                  <span>{state.store.openingHours}</span>
+                  <span aria-hidden="true">·</span>
+                  <span className="inline-flex items-center gap-1 font-mono-tabular">
+                    <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>~{state.store.estimatedMinutes} min</span>
+                  </span>
+                </div>
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-balance">
+                  {state.store.name}
+                </h1>
+                <p className="text-xs sm:text-sm text-slate-200 flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                  <span>
+                    {state.store.address} · {state.store.neighborhood} · Frete grátis acima de{' '}
+                    {formatCurrencyBRL(state.store.freeDeliveryMin)}
+                  </span>
+                </p>
               </div>
-              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-balance">
-                {state.store.name}
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-200 flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                <span>
-                  {state.store.address} · {state.store.neighborhood} · Frete grátis acima de{' '}
-                  {formatCurrencyBRL(state.store.freeDeliveryMin)}
-                </span>
-              </p>
             </div>
 
             <div className="flex items-center gap-2.5 shrink-0">

@@ -1,8 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  Bike,
+  Check,
   CheckCircle2,
+  Copy,
+  ExternalLink,
   Plus,
   Receipt,
   Trash2,
@@ -74,6 +78,26 @@ export function CouriersReportsSection({
   const [courierPixKey, setCourierPixKey] = useState('');
   const [addingCourier, setAddingCourier] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [origin, setOrigin] = useState('');
+  const [copiedPortalLink, setCopiedPortalLink] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setOrigin(window.location.origin);
+    }
+  }, []);
+
+  const courierPortalUrl = origin ? `${origin}/motoboy` : '/motoboy';
+
+  const handleCopyPortalLink = async () => {
+    try {
+      await navigator.clipboard.writeText(courierPortalUrl);
+      setCopiedPortalLink(true);
+      setTimeout(() => setCopiedPortalLink(false), 2500);
+    } catch {
+      // Ignore clipboard failures
+    }
+  };
 
   const referenceTimestamp = useMemo(() => {
     const latest = state.orders.reduce((max, o) => {
@@ -571,6 +595,60 @@ export function CouriersReportsSection({
             </div>
           </section>
 
+          {/* Exclusive Courier GPS Portal Link Strip */}
+          <section className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-lg bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-400 flex items-center justify-center shrink-0">
+                <Bike className="w-5 h-5" aria-hidden="true" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-900 dark:text-white">
+                  Portal Exclusivo do Motoboy com GPS e Rotas
+                </p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Envie este link para seus entregadores acessarem os pedidos da rota pelo celular e darem baixa na entrega.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <input
+                type="text"
+                readOnly
+                value={courierPortalUrl}
+                onFocus={(e) => e.currentTarget.select()}
+                aria-label="Link exclusivo do motoboy"
+                className="w-56 sm:w-64 px-3 py-1.5 text-xs font-mono-tabular bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-800 dark:text-slate-200"
+              />
+              <button
+                type="button"
+                onClick={handleCopyPortalLink}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg whitespace-nowrap"
+              >
+                {copiedPortalLink ? (
+                  <>
+                    <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Copiado</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Copiar Link</span>
+                  </>
+                )}
+              </button>
+              <a
+                href="/motoboy"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg whitespace-nowrap"
+              >
+                <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Abrir Portal</span>
+              </a>
+            </div>
+          </section>
+
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
             <section className="xl:col-span-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6">
               <h2 className="text-base font-semibold text-slate-900 dark:text-white flex items-center gap-2">
@@ -728,6 +806,15 @@ export function CouriersReportsSection({
                               {courier.deliveriesToday} entregas · {formatCurrencyBRL(feePayout)}
                             </strong>
                           </div>
+                          <a
+                            href={`/motoboy?id=${courier.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg whitespace-nowrap"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Portal GPS</span>
+                          </a>
                           <button
                             type="button"
                             onClick={() => setSelectedCourierId(courier.id)}

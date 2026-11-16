@@ -136,6 +136,7 @@ export function DeliveryShell() {
             setState({
               ...parsed,
               store: {
+                ...INITIAL_DELIVERY_STATE.store,
                 ...parsed.store,
                 evolution: {
                   ...INITIAL_DELIVERY_STATE.store.evolution,
@@ -785,12 +786,21 @@ export function DeliveryShell() {
             setActiveModule('pedidos');
             setMobileMenuOpen(false);
           }}
-          className="inline-flex items-center gap-2.5 text-base font-extrabold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0"
+          className="inline-flex items-center gap-2.5 text-base font-extrabold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0 min-w-0"
         >
-          <span className="w-6 h-6 rounded-md bg-brand-600 text-white text-xs font-extrabold flex items-center justify-center">
-            P
-          </span>
-          <span>PedidoFácil</span>
+          {state.store.logoImage ? (
+            <img
+              src={state.store.logoImage}
+              alt={state.store.name}
+              referrerPolicy="no-referrer"
+              className="w-7 h-7 rounded-md object-cover border border-slate-200 dark:border-slate-700 shrink-0"
+            />
+          ) : (
+            <span className="w-6 h-6 rounded-md bg-brand-600 text-white text-xs font-extrabold flex items-center justify-center shrink-0">
+              P
+            </span>
+          )}
+          <span className="truncate">PedidoFácil</span>
         </button>
         <button
           type="button"
