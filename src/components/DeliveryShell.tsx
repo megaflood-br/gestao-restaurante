@@ -4,8 +4,11 @@ import { useEffect, useState } from 'react';
 import {
   BarChart3,
   Bike,
+  Check,
   ClipboardList,
+  Copy,
   ExternalLink,
+  Image as ImageIcon,
   Menu,
   MessageSquare,
   Moon,
@@ -94,9 +97,14 @@ export function DeliveryShell() {
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>('loja');
   const [isDark, setIsDark] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [origin, setOrigin] = useState('');
+  const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
     setIsDark(document.documentElement.classList.contains('dark'));
+    if (typeof window !== 'undefined') {
+      setOrigin(window.location.origin);
+    }
 
     let cancelled = false;
     async function load() {
@@ -157,8 +165,23 @@ export function DeliveryShell() {
       }
     }
     load();
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== STORAGE_KEY || !event.newValue) return;
+      try {
+        const parsed = JSON.parse(event.newValue) as DeliveryStoreState;
+        if (parsed.store && parsed.orders) {
+          setState(parsed);
+        }
+      } catch {
+        // Ignore invalid storage payload
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
     return () => {
       cancelled = true;
+      window.removeEventListener('storage', handleStorage);
     };
   }, []);
 
@@ -480,6 +503,21 @@ export function DeliveryShell() {
     }).catch(() => {});
   };
 
+  const handleDeleteCourier = (id: string) => {
+    persistState((prev) => ({
+      ...prev,
+      couriers: prev.couriers.filter((c) => c.id !== id),
+      orders: prev.orders.map((order) =>
+        order.courierId === id ? { ...order, courierId: undefined } : order,
+      ),
+    }));
+    fetch('/api/couriers', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    }).catch(() => {});
+  };
+
   const handleUpdateTechnicalSheet = (
     menuItemId: string,
     technicalSheet: TechnicalSheetIngredient[],
@@ -575,6 +613,18 @@ export function DeliveryShell() {
     g.items.some((i) => i.id === activeModule),
   );
   const activeNav = activeGroup?.items.find((i) => i.id === activeModule);
+
+  const customerMenuUrl = origin ? `${origin}/cardapio` : '/cardapio';
+
+  const handleCopyCustomerLink = async () => {
+    try {
+      await navigator.clipboard.writeText(customerMenuUrl);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+    } catch {
+      // Ignore clipboard failures
+    }
+  };
 
   const openSettingsAt = (tab: SettingsTabId = 'loja') => {
     setSettingsTab(tab);
@@ -771,6 +821,7 @@ export function DeliveryShell() {
               state={state}
               onAddCourier={handleAddCourier}
               onUpdateCourier={handleUpdateCourier}
+              onDeleteCourier={handleDeleteCourier}
               onUpdateOrderStatus={handleUpdateOrderStatus}
             />
           ) : activeModule === 'cardapio' ? (
@@ -810,28 +861,77 @@ export function DeliveryShell() {
             />
           ) : activeModule === 'vitrine' ? (
             <div className="space-y-5">
-              <div className="px-4 py-3 bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <p className="text-xs text-slate-600 dark:text-slate-300">
-                  <strong className="text-slate-900 dark:text-white">
-                    Pré-visualização do Cardápio Online
-                  </strong>{' '}
-                  — pedidos finalizados aqui entram imediatamente na fila do Gestor de Pedidos com baixa automática de estoque.
-                </p>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setActiveModule('cardapio')}
-                    className="px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg whitespace-nowrap"
-                  >
-                    Editar Cardápio
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveModule('pedidos')}
-                    className="px-3 py-1.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg whitespace-nowrap"
-                  >
-                    Ver Pedidos
-                  </button>
+              <div className="p-4 bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl space-y-3">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                  <p className="text-xs text-slate-600 dark:text-slate-300">
+                    <strong className="text-slate-900 dark:text-white">
+                      Link de Acesso do Cliente
+                    </strong>{' '}
+                    — compartilhe o endereço abaixo para seus clientes fazerem pedidos sem acessar o painel administrativo.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => openSettingsAt('loja')}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg whitespace-nowrap"
+                    >
+                      <ImageIcon className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Trocar Capa</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveModule('cardapio')}
+                      className="px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg whitespace-nowrap"
+                    >
+                      Editar Cardápio
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveModule('pedidos')}
+                      className="px-3 py-1.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg whitespace-nowrap"
+                    >
+                      Ver Pedidos
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <input
+                    type="text"
+                    readOnly
+                    value={customerMenuUrl}
+                    onFocus={(e) => e.currentTarget.select()}
+                    aria-label="Link público do cardápio para o cliente"
+                    className="flex-1 min-w-0 px-3 py-1.5 text-xs font-mono-tabular bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-800 dark:text-slate-200"
+                  />
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleCopyCustomerLink}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg whitespace-nowrap"
+                    >
+                      {copiedLink ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>Link Copiado</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>Copiar Link</span>
+                        </>
+                      )}
+                    </button>
+                    <a
+                      href="/cardapio"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg whitespace-nowrap"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Abrir como Cliente</span>
+                    </a>
+                  </div>
                 </div>
               </div>
               <DigitalMenuSection

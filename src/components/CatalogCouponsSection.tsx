@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import {
+  Camera,
   CheckCircle2,
   PauseCircle,
   Pencil,
@@ -9,11 +10,13 @@ import {
   Search,
   Tags,
   Trash2,
+  Upload,
   UtensilsCrossed,
   X,
 } from 'lucide-react';
 import { formatCurrencyBRL } from '@/lib/formatters';
 import { calculateItemCmv } from '@/lib/stock-engine';
+import { readAndCompressImage } from '@/lib/image-upload';
 import type {
   AddonGroup,
   Coupon,
@@ -91,6 +94,9 @@ export function CatalogCouponsSection({
   const [itemPrepMinutes, setItemPrepMinutes] = useState('20');
   const [itemServes, setItemServes] = useState('Serve 1 pessoa');
   const [itemImage, setItemImage] = useState(IMAGE_PRESETS[0].url);
+  const [previewImgError, setPreviewImgError] = useState(false);
+  const [uploadingImg, setUploadingImg] = useState(false);
+  const [imgUploadError, setImgUploadError] = useState('');
   const [itemAddonGroups, setItemAddonGroups] = useState<AddonGroup[]>([]);
   const [savingItem, setSavingItem] = useState(false);
 
@@ -130,6 +136,8 @@ export function CatalogCouponsSection({
     setItemPrepMinutes('20');
     setItemServes('Serve 1 pessoa');
     setItemImage(IMAGE_PRESETS[0].url);
+    setPreviewImgError(false);
+    setImgUploadError('');
     setItemAddonGroups([]);
     setItemModalOpen(true);
   };
@@ -144,8 +152,35 @@ export function CatalogCouponsSection({
     setItemPrepMinutes(String(item.prepMinutes));
     setItemServes(item.serves);
     setItemImage(item.image);
+    setPreviewImgError(false);
+    setImgUploadError('');
     setItemAddonGroups(structuredClone(item.addonGroups));
     setItemModalOpen(true);
+  };
+
+  const handleDishImageFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImgUploadError('');
+    setUploadingImg(true);
+    try {
+      const dataUrl = await readAndCompressImage(file, {
+        maxWidth: 800,
+        maxHeight: 800,
+        quality: 0.82,
+      });
+      setItemImage(dataUrl);
+      setPreviewImgError(false);
+    } catch (err) {
+      setImgUploadError(
+        err instanceof Error ? err.message : 'Falha ao carregar imagem.',
+      );
+    } finally {
+      setUploadingImg(false);
+    }
   };
 
   const handleToggleAddonAvailability = (groupId: string, optionId: string) => {
@@ -223,6 +258,11 @@ export function CatalogCouponsSection({
     try {
       if (editingItem) {
         onUpdateMenuItem(editingItem.id, payload);
+        setFailedImages((prev) => {
+          const next = { ...prev };
+          delete next[editingItem.id];
+          return next;
+        });
         await fetch('/api/catalog', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -508,7 +548,13 @@ export function CatalogCouponsSection({
                       >
                         <td className="py-3 px-5 min-w-[260px]">
                           <div className="flex items-center gap-3">
-                            <div className="w-12 h-12 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 shrink-0 flex items-center justify-center">
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(item)}
+                              title="Alterar foto ou editar prato"
+                              aria-label={`Alterar foto de ${item.name}`}
+                              className="group relative w-12 h-12 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 shrink-0 flex items-center justify-center border border-slate-200 dark:border-slate-700"
+                            >
                               {broken ? (
                                 <UtensilsCrossed className="w-5 h-5 text-slate-400" />
                               ) : (
@@ -525,7 +571,10 @@ export function CatalogCouponsSection({
                                   className="w-full h-full object-cover"
                                 />
                               )}
-                            </div>
+                              <span className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                                <Camera className="w-4 h-4" aria-hidden="true" />
+                              </span>
+                            </button>
                             <div className="min-w-0">
                               <p className="font-semibold text-slate-900 dark:text-white truncate">
                                 {item.name}
@@ -1093,25 +1142,102 @@ export function CatalogCouponsSection({
                   </div>
                 </div>
 
-                <div>
-                  <label
-                    htmlFor="ed-img"
-                    className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-                  >
-                    Imagem do Prato
-                  </label>
-                  <select
-                    id="ed-img"
-                    value={itemImage}
-                    onChange={(e) => setItemImage(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-                  >
-                    {IMAGE_PRESETS.map((preset) => (
-                      <option key={preset.url} value={preset.url}>
-                        {preset.label}
-                      </option>
-                    ))}
-                  </select>
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="block text-xs font-semibold text-slate-900 dark:text-white">
+                      Foto do Prato
+                    </span>
+                    <label className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-950/50 border border-brand-200 dark:border-brand-800 hover:bg-brand-100 dark:hover:bg-brand-900/50 rounded-lg cursor-pointer whitespace-nowrap">
+                      <Upload className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>{uploadingImg ? 'Processando...' : 'Enviar Foto'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleDishImageFileChange}
+                        className="sr-only"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-3 items-start">
+                    <div className="w-24 h-24 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shrink-0 flex items-center justify-center">
+                      {previewImgError || !itemImage.trim() ? (
+                        <UtensilsCrossed className="w-6 h-6 text-slate-400" aria-hidden="true" />
+                      ) : (
+                        <img
+                          src={itemImage}
+                          alt={itemName || 'Prévia do prato'}
+                          referrerPolicy="no-referrer"
+                          onError={() => setPreviewImgError(true)}
+                          className="w-full h-full object-cover"
+                        />
+                      )}
+                    </div>
+
+                    <div className="flex-1 w-full space-y-2">
+                      <div>
+                        <label
+                          htmlFor="ed-img-url"
+                          className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1"
+                        >
+                          Ou cole o link (URL) da imagem
+                        </label>
+                        <input
+                          id="ed-img-url"
+                          type="text"
+                          value={itemImage}
+                          onChange={(e) => {
+                            setItemImage(e.target.value);
+                            setPreviewImgError(false);
+                            setImgUploadError('');
+                          }}
+                          placeholder="https://... ou /images/..."
+                          className="w-full px-3 py-1.5 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                        />
+                      </div>
+
+                      <div>
+                        <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">
+                          Fotos prontas da galeria
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {IMAGE_PRESETS.map((preset) => {
+                            const selected = itemImage === preset.url;
+                            return (
+                              <button
+                                key={preset.url}
+                                type="button"
+                                onClick={() => {
+                                  setItemImage(preset.url);
+                                  setPreviewImgError(false);
+                                  setImgUploadError('');
+                                }}
+                                title={preset.label}
+                                className={`w-10 h-10 rounded-md overflow-hidden border-2 transition-all ${
+                                  selected
+                                    ? 'border-brand-600 ring-2 ring-brand-500/30'
+                                    : 'border-slate-200 dark:border-slate-700 opacity-80 hover:opacity-100'
+                                }`}
+                              >
+                                <img
+                                  src={preset.url}
+                                  alt={preset.label}
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-full object-cover"
+                                />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {imgUploadError && (
+                    <p className="text-xs text-red-600 dark:text-red-400">
+                      {imgUploadError}
+                    </p>
+                  )}
                 </div>
 
                 <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">

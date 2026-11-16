@@ -279,7 +279,12 @@ function buildStoreContextPrompt(
           .join('\n')
       : 'Nenhum pedido recente encontrado para este telefone.';
 
-  const appUrl = (process.env.APP_URL ?? 'https://pedidofacil.local').trim();
+  const rawBaseUrl = (process.env.APP_URL ?? 'https://pedidofacil.local')
+    .trim()
+    .replace(/\/+$/, '');
+  const appUrl = rawBaseUrl.endsWith('/cardapio')
+    ? rawBaseUrl
+    : `${rawBaseUrl}/cardapio`;
 
   return [
     `Você é ${assistantName}, atendente virtual humana e natural no WhatsApp do restaurante "${state.store.name}" (${state.store.segment}).`,
@@ -453,7 +458,12 @@ function generateLocalBrendiFallback(params: {
   const evo = state.store.evolution;
   const assistantName = evo.assistantName?.trim() || 'Brenda';
   const tone = evo.tone || 'acolhedor';
-  const appUrl = (process.env.APP_URL ?? 'https://pedidofacil.local').trim();
+  const rawBaseUrl = (process.env.APP_URL ?? 'https://pedidofacil.local')
+    .trim()
+    .replace(/\/+$/, '');
+  const appUrl = rawBaseUrl.endsWith('/cardapio')
+    ? rawBaseUrl
+    : `${rawBaseUrl}/cardapio`;
   const cleanPhone = customerPhone.replace(/\D/g, '') || 'anonimo';
   const drafts = getOrderDrafts();
   const firstName = customerName.split(' ')[0] || customerName;

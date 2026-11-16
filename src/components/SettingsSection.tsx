@@ -3,20 +3,26 @@
 import { useEffect, useState } from 'react';
 import {
   Bot,
+  Check,
   CheckCircle2,
   Clock,
+  Copy,
+  ExternalLink,
   KeyRound,
   Link2,
   MessageSquare,
   Power,
   QrCode,
   Save,
+  Share2,
   ShieldCheck,
   Smartphone,
   Sparkles,
   Store,
+  Upload,
 } from 'lucide-react';
 import { formatCurrencyBRL, formatTimeBR } from '@/lib/formatters';
+import { readAndCompressImage } from '@/lib/image-upload';
 import type {
   BotTone,
   DeliveryStoreState,
@@ -37,6 +43,25 @@ interface SettingsSectionProps {
 }
 
 const BRENDA_AVATAR_URL = '/images/avatar_brenda_atendente_1794784551375.jpg';
+
+const COVER_PRESETS = [
+  {
+    label: 'Capa Executiva Padrão',
+    url: '/images/hero_marmitaria_executiva_1794779703057.jpg',
+  },
+  {
+    label: 'Grelhados na Brasa',
+    url: '/images/dish_frango_grelhado_1794779703159.jpg',
+  },
+  {
+    label: 'Cortes & Acebolados',
+    url: '/images/dish_bife_acebolado_1794779706518.jpg',
+  },
+  {
+    label: 'Pratos Artesanais',
+    url: '/images/dish_strogonoff_carne_1794779704740.jpg',
+  },
+];
 
 const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -126,6 +151,10 @@ export function SettingsSection({
   const [estimatedMinutes, setEstimatedMinutes] = useState(
     String(store.estimatedMinutes),
   );
+  const [heroImage, setHeroImage] = useState(store.heroImage);
+  const [uploadingCover, setUploadingCover] = useState(false);
+  const [origin, setOrigin] = useState('');
+  const [copiedCustomerLink, setCopiedCustomerLink] = useState(false);
   const [savingStore, setSavingStore] = useState(false);
 
   // AI & Evolution config state
@@ -206,7 +235,15 @@ export function SettingsSection({
     setDeliveryFee(String(store.deliveryFee));
     setFreeDeliveryMin(String(store.freeDeliveryMin));
     setEstimatedMinutes(String(store.estimatedMinutes));
+    setHeroImage(store.heroImage);
+    setHeroImgFailed(false);
   }, [store]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setOrigin(window.location.origin);
+    }
+  }, []);
 
   useEffect(() => {
     setInstanceName(evolution.instanceName);
@@ -260,13 +297,70 @@ export function SettingsSection({
         deliveryFee: Math.max(0, Number(deliveryFee) || 0),
         freeDeliveryMin: Math.max(0, Number(freeDeliveryMin) || 0),
         estimatedMinutes: Math.max(5, Number(estimatedMinutes) || 30),
+        heroImage: heroImage.trim() || COVER_PRESETS[0].url,
       });
       setFeedback({
         type: 'ok',
-        message: 'Dados da loja e regras de entrega salvos com sucesso.',
+        message: 'Dados da loja, capa do cardápio e regras de entrega salvos com sucesso.',
       });
     } finally {
       setSavingStore(false);
+    }
+  };
+
+  const handleCoverFileUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadingCover(true);
+    setFeedback(null);
+    try {
+      const dataUrl = await readAndCompressImage(file, {
+        maxWidth: 1400,
+        maxHeight: 700,
+        quality: 0.84,
+      });
+      setHeroImage(dataUrl);
+      setHeroImgFailed(false);
+      await onUpdateStore({ heroImage: dataUrl });
+      setFeedback({
+        type: 'ok',
+        message: 'Capa do Cardápio Online atualizada e publicada.',
+      });
+    } catch (err) {
+      setFeedback({
+        type: 'error',
+        message:
+          err instanceof Error
+            ? err.message
+            : 'Não foi possível processar a imagem da capa.',
+      });
+    } finally {
+      setUploadingCover(false);
+    }
+  };
+
+  const handleSelectCoverPreset = async (url: string) => {
+    setHeroImage(url);
+    setHeroImgFailed(false);
+    await onUpdateStore({ heroImage: url });
+    setFeedback({
+      type: 'ok',
+      message: 'Capa do Cardápio Online alterada.',
+    });
+  };
+
+  const customerMenuUrl = origin ? `${origin}/cardapio` : '/cardapio';
+
+  const handleCopyCustomerLink = async () => {
+    try {
+      await navigator.clipboard.writeText(customerMenuUrl);
+      setCopiedCustomerLink(true);
+      setTimeout(() => setCopiedCustomerLink(false), 2500);
+    } catch {
+      // Fallback ignored in restricted frames
     }
   };
 
@@ -745,6 +839,79 @@ export function SettingsSection({
                     </div>
                   </div>
 
+                  <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                          Capa do Cardápio Online
+                        </p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Banner exibido no topo da página de pedidos do cliente.
+                        </p>
+                      </div>
+                      <label className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-950/50 border border-brand-200 dark:border-brand-800 hover:bg-brand-100 dark:hover:bg-brand-900/50 rounded-lg cursor-pointer whitespace-nowrap">
+                        <Upload className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>{uploadingCover ? 'Enviando...' : 'Enviar Nova Capa'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleCoverFileUpload}
+                          className="sr-only"
+                        />
+                      </label>
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="cfg-store-hero"
+                        className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1"
+                      >
+                        Link (URL) da imagem de capa
+                      </label>
+                      <input
+                        id="cfg-store-hero"
+                        value={heroImage}
+                        onChange={(e) => {
+                          setHeroImage(e.target.value);
+                          setHeroImgFailed(false);
+                        }}
+                        placeholder="https://... ou /images/..."
+                        className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </div>
+
+                    <div>
+                      <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">
+                        Ou escolha uma capa pronta:
+                      </p>
+                      <div className="grid grid-cols-4 gap-2">
+                        {COVER_PRESETS.map((preset) => {
+                          const selected = heroImage === preset.url;
+                          return (
+                            <button
+                              key={preset.url}
+                              type="button"
+                              onClick={() => handleSelectCoverPreset(preset.url)}
+                              title={preset.label}
+                              className={`relative aspect-video rounded-lg overflow-hidden border-2 transition-all ${
+                                selected
+                                  ? 'border-brand-600 ring-2 ring-brand-500/30'
+                                  : 'border-slate-200 dark:border-slate-700 opacity-80 hover:opacity-100'
+                              }`}
+                            >
+                              <img
+                                src={preset.url}
+                                alt={preset.label}
+                                referrerPolicy="no-referrer"
+                                className="w-full h-full object-cover"
+                              />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
                   <div className="pt-2 flex justify-end">
                     <button
                       type="submit"
@@ -758,54 +925,121 @@ export function SettingsSection({
                 </form>
               </section>
 
-              <aside className="xl:col-span-4 bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-                <div className="aspect-video w-full bg-slate-100 dark:bg-slate-800 relative overflow-hidden">
-                  {heroImgFailed ? (
-                    <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 p-4 text-center">
-                      <Store className="w-8 h-8 mb-2" aria-hidden="true" />
-                      <span className="text-sm font-medium">{store.name}</span>
+              <div className="xl:col-span-4 space-y-6">
+                <aside className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                  <div className="aspect-video w-full bg-slate-100 dark:bg-slate-800 relative overflow-hidden">
+                    {heroImgFailed || !heroImage.trim() ? (
+                      <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 p-4 text-center">
+                        <Store className="w-8 h-8 mb-2" aria-hidden="true" />
+                        <span className="text-sm font-medium">{store.name}</span>
+                      </div>
+                    ) : (
+                      <img
+                        src={heroImage}
+                        alt={store.name}
+                        referrerPolicy="no-referrer"
+                        onError={() => setHeroImgFailed(true)}
+                        className="w-full h-full object-cover"
+                      />
+                    )}
+                  </div>
+                  <div className="p-5 space-y-3">
+                    <div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        {store.segment} · {store.neighborhood}
+                      </p>
+                      <h3 className="mt-0.5 text-base font-bold text-slate-900 dark:text-white">
+                        {store.name}
+                      </h3>
                     </div>
-                  ) : (
-                    <img
-                      src={store.heroImage}
-                      alt={store.name}
-                      referrerPolicy="no-referrer"
-                      onError={() => setHeroImgFailed(true)}
-                      className="w-full h-full object-cover"
+                    <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-1.5 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Taxa padrão</span>
+                        <span className="font-mono-tabular font-semibold text-slate-900 dark:text-white">
+                          {formatCurrencyBRL(store.deliveryFee)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Frete grátis acima de</span>
+                        <span className="font-mono-tabular font-semibold text-emerald-700 dark:text-emerald-400">
+                          {formatCurrencyBRL(store.freeDeliveryMin)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Tempo médio</span>
+                        <span className="font-mono-tabular font-semibold text-slate-900 dark:text-white">
+                          {store.estimatedMinutes} min
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </aside>
+
+                <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        <Link2 className="w-4 h-4 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                        <span>Link de Acesso do Cliente</span>
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        Envie este endereço no WhatsApp, Instagram ou QR Code das mesas para o cliente pedir direto sem acessar o painel.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={customerMenuUrl}
+                      onFocus={(e) => e.currentTarget.select()}
+                      aria-label="Link público do cardápio para clientes"
+                      className="flex-1 min-w-0 px-3 py-2 text-xs font-mono-tabular bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-800 dark:text-slate-200"
                     />
-                  )}
-                </div>
-                <div className="p-5 space-y-3">
-                  <div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {store.segment} · {store.neighborhood}
-                    </p>
-                    <h3 className="mt-0.5 text-base font-bold text-slate-900 dark:text-white">
-                      {store.name}
-                    </h3>
+                    <button
+                      type="button"
+                      onClick={handleCopyCustomerLink}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg whitespace-nowrap shrink-0"
+                    >
+                      {copiedCustomerLink ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>Copiado</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>Copiar</span>
+                        </>
+                      )}
+                    </button>
                   </div>
-                  <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-1.5 text-xs">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Taxa padrão</span>
-                      <span className="font-mono-tabular font-semibold text-slate-900 dark:text-white">
-                        {formatCurrencyBRL(store.deliveryFee)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Frete grátis acima de</span>
-                      <span className="font-mono-tabular font-semibold text-emerald-700 dark:text-emerald-400">
-                        {formatCurrencyBRL(store.freeDeliveryMin)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Tempo médio</span>
-                      <span className="font-mono-tabular font-semibold text-slate-900 dark:text-white">
-                        {store.estimatedMinutes} min
-                      </span>
-                    </div>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <a
+                      href="/cardapio"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg whitespace-nowrap"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Abrir Cardápio do Cliente</span>
+                    </a>
+                    <a
+                      href={`https://wa.me/?text=${encodeURIComponent(
+                        `Peça pelo nosso cardápio digital (${store.name}): ${customerMenuUrl}`,
+                      )}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-lg whitespace-nowrap"
+                    >
+                      <Share2 className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Compartilhar WhatsApp</span>
+                    </a>
                   </div>
-                </div>
-              </aside>
+                </section>
+              </div>
             </div>
           )}
 

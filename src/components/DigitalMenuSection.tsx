@@ -109,7 +109,7 @@ export function DigitalMenuSection({
       {/* Storefront Hero Banner */}
       <section className="relative rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-900">
         <div className="aspect-[16/6] min-h-[210px] max-h-[290px] w-full relative">
-          {failedImages['hero'] ? (
+          {failedImages[state.store.heroImage] || !state.store.heroImage ? (
             <div className="w-full h-full bg-slate-800" />
           ) : (
             <img
@@ -117,7 +117,10 @@ export function DigitalMenuSection({
               alt={state.store.name}
               referrerPolicy="no-referrer"
               onError={() =>
-                setFailedImages((prev) => ({ ...prev, hero: true }))
+                setFailedImages((prev) => ({
+                  ...prev,
+                  [state.store.heroImage]: true,
+                }))
               }
               className="w-full h-full object-cover"
             />
@@ -304,7 +307,7 @@ export function DigitalMenuSection({
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {filteredItems.map((item) => {
             const effectivePrice = item.promoPrice ?? item.price;
-            const imgBroken = failedImages[item.id];
+            const imgBroken = failedImages[item.image] || !item.image;
             return (
               <article
                 key={item.id}
@@ -324,7 +327,10 @@ export function DigitalMenuSection({
                       alt={item.name}
                       referrerPolicy="no-referrer"
                       onError={() =>
-                        setFailedImages((prev) => ({ ...prev, [item.id]: true }))
+                        setFailedImages((prev) => ({
+                          ...prev,
+                          [item.image]: true,
+                        }))
                       }
                       className="w-full h-full object-cover"
                     />

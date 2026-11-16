@@ -2,9 +2,9 @@
 
 import { useMemo, useState } from 'react';
 import {
-  Bike,
   CheckCircle2,
   Plus,
+  Trash2,
 } from 'lucide-react';
 import {
   COURIER_STATUS_LABEL,
@@ -26,6 +26,7 @@ interface CouriersReportsSectionProps {
   state: DeliveryStoreState;
   onAddCourier: (courier: Courier) => void;
   onUpdateCourier: (id: string, updates: Partial<Courier>) => void;
+  onDeleteCourier?: (id: string) => void;
   onUpdateOrderStatus: (
     orderId: string,
     status: OrderStatus,
@@ -46,6 +47,7 @@ export function CouriersReportsSection({
   state,
   onAddCourier,
   onUpdateCourier,
+  onDeleteCourier,
   onUpdateOrderStatus,
 }: CouriersReportsSectionProps) {
   const activeTab = mode === 'entregadores' ? 'entregadores' : 'relatorios';
@@ -56,6 +58,7 @@ export function CouriersReportsSection({
   const [courierVehicle, setCourierVehicle] = useState('');
   const [courierPlate, setCourierPlate] = useState('');
   const [addingCourier, setAddingCourier] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const referenceTimestamp = useMemo(() => {
     const latest = state.orders.reduce((max, o) => {
@@ -611,105 +614,151 @@ export function CouriersReportsSection({
             </section>
 
             <section className="xl:col-span-8 space-y-4">
-              {state.couriers.map((courier) => {
-                const activeOrders = state.orders.filter(
-                  (o) =>
-                    o.courierId === courier.id &&
-                    (o.status === 'entrega' || o.status === 'pronto'),
-                );
-                const feePayout = courier.deliveriesToday * state.store.deliveryFee;
+              {state.couriers.length === 0 ? (
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-8 text-center">
+                  <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                    Nenhum entregador cadastrado
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Use o formulário ao lado para adicionar motoboys à sua frota.
+                  </p>
+                </div>
+              ) : (
+                state.couriers.map((courier) => {
+                  const activeOrders = state.orders.filter(
+                    (o) =>
+                      o.courierId === courier.id &&
+                      (o.status === 'entrega' || o.status === 'pronto'),
+                  );
+                  const feePayout = courier.deliveriesToday * state.store.deliveryFee;
+                  const confirmingDelete = confirmDeleteId === courier.id;
 
-                return (
-                  <article
-                    key={courier.id}
-                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4"
-                  >
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2.5">
-                          <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                            {courier.name}
-                          </h3>
-                          <span
-                            className={`text-xs font-semibold ${
-                              courier.status === 'disponivel'
-                                ? 'text-emerald-700 dark:text-emerald-400'
-                                : courier.status === 'em_rota'
-                                  ? 'text-brand-600 dark:text-brand-400'
-                                  : 'text-slate-500'
-                            }`}
-                          >
-                            {COURIER_STATUS_LABEL[courier.status]}
-                          </span>
-                        </div>
-                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 font-mono-tabular">
-                          {courier.phone} · {courier.vehicle} ({courier.plate})
-                        </p>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2.5">
-                        <div className="text-xs text-right mr-2">
-                          <span className="text-slate-500">Hoje: </span>
-                          <strong className="font-mono-tabular text-slate-900 dark:text-white">
-                            {courier.deliveriesToday} entregas · {formatCurrencyBRL(feePayout)}
-                          </strong>
-                        </div>
-                        <select
-                          aria-label={`Status de ${courier.name}`}
-                          value={courier.status}
-                          onChange={(e) =>
-                            onUpdateCourier(courier.id, {
-                              status: e.target.value as CourierStatus,
-                            })
-                          }
-                          className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-                        >
-                          <option value="disponivel">Disponível</option>
-                          <option value="em_rota">Em Rota</option>
-                          <option value="offline">Offline</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    {activeOrders.length > 0 && (
-                      <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
-                        <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                          Pedidos atribuídos em rota ({activeOrders.length})
-                        </p>
-                        <div className="divide-y divide-slate-200 dark:divide-slate-800">
-                          {activeOrders.map((order) => (
-                            <div
-                              key={order.id}
-                              className="py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                  return (
+                    <article
+                      key={courier.id}
+                      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2.5">
+                            <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                              {courier.name}
+                            </h3>
+                            <span
+                              className={`text-xs font-semibold ${
+                                courier.status === 'disponivel'
+                                  ? 'text-emerald-700 dark:text-emerald-400'
+                                  : courier.status === 'em_rota'
+                                    ? 'text-brand-600 dark:text-brand-400'
+                                    : 'text-slate-500'
+                              }`}
                             >
-                              <div>
-                                <span className="font-mono-tabular font-bold text-slate-900 dark:text-white">
-                                  #{order.orderNumber}
-                                </span>{' '}
-                                · {order.customerName} · {order.address} ({order.neighborhood})
+                              {COURIER_STATUS_LABEL[courier.status]}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400 font-mono-tabular">
+                            {courier.phone} · {courier.vehicle} ({courier.plate})
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="text-xs text-right mr-1">
+                            <span className="text-slate-500">Hoje: </span>
+                            <strong className="font-mono-tabular text-slate-900 dark:text-white">
+                              {courier.deliveriesToday} entregas · {formatCurrencyBRL(feePayout)}
+                            </strong>
+                          </div>
+                          <select
+                            aria-label={`Status de ${courier.name}`}
+                            value={courier.status}
+                            onChange={(e) =>
+                              onUpdateCourier(courier.id, {
+                                status: e.target.value as CourierStatus,
+                              })
+                            }
+                            className="px-2.5 py-1.5 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                          >
+                            <option value="disponivel">Disponível</option>
+                            <option value="em_rota">Em Rota</option>
+                            <option value="offline">Offline</option>
+                          </select>
+
+                          {onDeleteCourier && (
+                            confirmingDelete ? (
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onDeleteCourier(courier.id);
+                                    setConfirmDeleteId(null);
+                                  }}
+                                  className="px-2.5 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg whitespace-nowrap"
+                                >
+                                  Confirmar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteId(null)}
+                                  className="px-2 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg whitespace-nowrap"
+                                >
+                                  Cancelar
+                                </button>
                               </div>
+                            ) : (
                               <button
                                 type="button"
-                                onClick={() =>
-                                  onUpdateOrderStatus(
-                                    order.id,
-                                    'finalizado',
-                                    courier.id,
-                                  )
-                                }
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-md self-start sm:self-auto whitespace-nowrap"
+                                onClick={() => setConfirmDeleteId(courier.id)}
+                                aria-label={`Excluir entregador ${courier.name}`}
+                                title="Excluir entregador"
+                                className="p-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg border border-transparent hover:border-red-200 dark:hover:border-red-900 transition-colors"
                               >
-                                <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
-                                <span>Confirmar Entrega</span>
+                                <Trash2 className="w-4 h-4" aria-hidden="true" />
                               </button>
-                            </div>
-                          ))}
+                            )
+                          )}
                         </div>
                       </div>
-                    )}
-                  </article>
-                );
-              })}
+
+                      {activeOrders.length > 0 && (
+                        <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                            Pedidos atribuídos em rota ({activeOrders.length})
+                          </p>
+                          <div className="divide-y divide-slate-200 dark:divide-slate-800">
+                            {activeOrders.map((order) => (
+                              <div
+                                key={order.id}
+                                className="py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                              >
+                                <div>
+                                  <span className="font-mono-tabular font-bold text-slate-900 dark:text-white">
+                                    #{order.orderNumber}
+                                  </span>{' '}
+                                  · {order.customerName} · {order.address} ({order.neighborhood})
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onUpdateOrderStatus(
+                                      order.id,
+                                      'finalizado',
+                                      courier.id,
+                                    )
+                                  }
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-md self-start sm:self-auto whitespace-nowrap"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
+                                  <span>Confirmar Entrega</span>
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </article>
+                  );
+                })
+              )}
             </section>
           </div>
         </div>

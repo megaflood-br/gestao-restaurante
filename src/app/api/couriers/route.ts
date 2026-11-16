@@ -70,3 +70,43 @@ export async function PATCH(request: NextRequest) {
     );
   }
 }
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const url = new URL(request.url);
+    let id = url.searchParams.get('id') ?? '';
+    if (!id) {
+      const body = (await request.json().catch(() => ({}))) as { id?: string };
+      id = body.id ?? '';
+    }
+
+    if (!id.trim()) {
+      return NextResponse.json(
+        { ok: false, error: 'Informe o identificador do entregador.' },
+        { status: 400 },
+      );
+    }
+
+    const db = getDeliveryStore();
+    const exists = db.couriers.some((c) => c.id === id);
+    if (!exists) {
+      return NextResponse.json(
+        { ok: false, error: 'Entregador não encontrado.' },
+        { status: 404 },
+      );
+    }
+
+    db.couriers = db.couriers.filter((c) => c.id !== id);
+    db.orders = db.orders.map((order) =>
+      order.courierId === id ? { ...order, courierId: undefined } : order,
+    );
+
+    return NextResponse.json({ ok: true, couriers: db.couriers });
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: 'Erro ao excluir entregador.' },
+      { status: 400 },
+    );
+  }
+}
+
