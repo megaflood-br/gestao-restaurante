@@ -14,8 +14,10 @@ import {
   Package,
   Phone,
   RefreshCw,
+  ShieldCheck,
   Sun,
   Truck,
+  X,
 } from 'lucide-react';
 import { CourierGpsMap, type LatLngPoint } from '@/components/CourierGpsMap';
 import { INITIAL_DELIVERY_STATE } from '@/lib/delivery-seed';
@@ -72,12 +74,26 @@ export function CourierAppPage() {
 
   const [isDark, setIsDark] = useState(false);
   const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
+  const [confirmDeliveryOrder, setConfirmDeliveryOrder] = useState<Order | null>(
+    null,
+  );
   const [refreshing, setRefreshing] = useState(false);
   const [feedback, setFeedback] = useState<{
     type: 'ok' | 'error';
     message: string;
   } | null>(null);
   const [logoFailed, setLogoFailed] = useState(false);
+
+  useEffect(() => {
+    if (!confirmDeliveryOrder) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setConfirmDeliveryOrder(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [confirmDeliveryOrder]);
 
   // Two-Tier Demo Key Quota Defense (Tier 1: window.gm_authFailure + console.error tap)
   useEffect(() => {
@@ -925,9 +941,7 @@ export function CourierAppPage() {
                               <button
                                 type="button"
                                 disabled={isBusy}
-                                onClick={() =>
-                                  handleOrderTransition(order, 'finalizado', true)
-                                }
+                                onClick={() => setConfirmDeliveryOrder(order)}
                                 className="min-h-[48px] w-full inline-flex items-center justify-center gap-2 px-4 py-3 text-sm font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl disabled:opacity-60"
                               >
                                 <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
@@ -975,6 +989,116 @@ export function CourierAppPage() {
           </>
         )}
       </main>
+
+      {/* Two-Step Delivery Confirmation Safety Lock Modal */}
+      {confirmDeliveryOrder && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-delivery-title"
+        >
+          <div
+            className="fixed inset-0 bg-slate-950/65 backdrop-blur-[2px]"
+            onClick={() => setConfirmDeliveryOrder(null)}
+            aria-hidden="true"
+          />
+
+          <div className="relative z-10 w-full max-w-md bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                  <ShieldCheck className="w-5 h-5" aria-hidden="true" />
+                </div>
+                <div>
+                  <h2
+                    id="confirm-delivery-title"
+                    className="text-base sm:text-lg font-bold text-slate-900 dark:text-white"
+                  >
+                    Deseja marcar como entregue?
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Confirme apenas quando o pedido já estiver em mãos do cliente.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setConfirmDeliveryOrder(null)}
+                aria-label="Fechar confirmação"
+                className="min-h-[36px] min-w-[36px] inline-flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+              >
+                <X className="w-5 h-5" aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1.5 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono-tabular font-extrabold text-slate-900 dark:text-white">
+                  Pedido #{confirmDeliveryOrder.orderNumber}
+                </span>
+                <span className="font-mono-tabular font-bold text-slate-900 dark:text-white">
+                  {formatCurrencyBRL(confirmDeliveryOrder.total)}
+                </span>
+              </div>
+              <p className="font-semibold text-slate-800 dark:text-slate-200">
+                {confirmDeliveryOrder.customerName}
+              </p>
+              <p className="text-slate-600 dark:text-slate-400">
+                {confirmDeliveryOrder.address} · {confirmDeliveryOrder.neighborhood}
+                {confirmDeliveryOrder.complement
+                  ? ` (${confirmDeliveryOrder.complement})`
+                  : ''}
+              </p>
+              <p className="text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200/80 dark:border-slate-800">
+                Pagamento:{' '}
+                <strong className="text-slate-900 dark:text-white">
+                  {PAYMENT_METHOD_LABEL[confirmDeliveryOrder.paymentMethod]}
+                </strong>
+              </p>
+            </div>
+
+            {(confirmDeliveryOrder.paymentMethod === 'dinheiro' ||
+              confirmDeliveryOrder.paymentMethod === 'cartao_entrega') && (
+              <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                <AlertTriangle
+                  className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5"
+                  aria-hidden="true"
+                />
+                <span>
+                  {confirmDeliveryOrder.paymentMethod === 'dinheiro'
+                    ? `Confira se recebeu ${formatCurrencyBRL(confirmDeliveryOrder.total)} em dinheiro antes de concluir.`
+                    : `Confira se o pagamento na maquininha (${formatCurrencyBRL(confirmDeliveryOrder.total)}) foi aprovado antes de concluir.`}
+                </span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setConfirmDeliveryOrder(null)}
+                className="min-h-[48px] w-full px-4 py-3 text-sm font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors"
+              >
+                Ainda Não (Voltar)
+              </button>
+              <button
+                type="button"
+                disabled={busyOrderId === confirmDeliveryOrder.id}
+                onClick={async () => {
+                  const target = confirmDeliveryOrder;
+                  setConfirmDeliveryOrder(null);
+                  await handleOrderTransition(target, 'finalizado', true);
+                }}
+                className="min-h-[48px] w-full inline-flex items-center justify-center gap-2 px-4 py-3 text-sm font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl disabled:opacity-60 transition-colors"
+              >
+                <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+                <span>Sim, Marcar Entregue</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

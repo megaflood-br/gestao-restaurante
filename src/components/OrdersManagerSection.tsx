@@ -81,6 +81,9 @@ export function OrdersManagerSection({
   const [manualOpen, setManualOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [dispatchCouriers, setDispatchCouriers] = useState<Record<string, string>>({});
+  const [confirmFinalizeOrderId, setConfirmFinalizeOrderId] = useState<string | null>(
+    null,
+  );
 
   const pendingCount = state.orders.filter((o) => o.status === 'pendente').length;
   const prevPendingRef = useRef(pendingCount);
@@ -411,22 +414,58 @@ export function OrdersManagerSection({
                           )}
 
                           {meta.nextStatus && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                onUpdateOrderStatus(
-                                  order.id,
-                                  meta.nextStatus!,
-                                  meta.nextStatus === 'entrega' &&
-                                    order.deliveryMode === 'entrega'
-                                    ? chosenCourierId
-                                    : order.courierId,
-                                )
-                              }
-                              className="w-full py-1.5 px-2.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-md transition-colors"
-                            >
-                              {meta.nextLabel}
-                            </button>
+                            meta.nextStatus === 'finalizado' && order.status === 'entrega' ? (
+                              confirmFinalizeOrderId === order.id ? (
+                                <div className="grid grid-cols-2 gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      setConfirmFinalizeOrderId(null);
+                                      await onUpdateOrderStatus(
+                                        order.id,
+                                        'finalizado',
+                                        order.courierId,
+                                      );
+                                    }}
+                                    className="py-1.5 px-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-md transition-colors"
+                                  >
+                                    Sim, Entregue
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmFinalizeOrderId(null)}
+                                    className="py-1.5 px-2 text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md transition-colors"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmFinalizeOrderId(order.id)}
+                                  className="w-full py-1.5 px-2.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-md transition-colors"
+                                >
+                                  {meta.nextLabel}
+                                </button>
+                              )
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onUpdateOrderStatus(
+                                    order.id,
+                                    meta.nextStatus!,
+                                    meta.nextStatus === 'entrega' &&
+                                      order.deliveryMode === 'entrega'
+                                      ? chosenCourierId
+                                      : order.courierId,
+                                  )
+                                }
+                                className="w-full py-1.5 px-2.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-md transition-colors"
+                              >
+                                {meta.nextLabel}
+                              </button>
+                            )
                           )}
                         </article>
                       );
@@ -506,22 +545,58 @@ export function OrdersManagerSection({
                               <Printer className="w-4 h-4" />
                             </button>
                             {meta.nextStatus && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  onUpdateOrderStatus(
-                                    order.id,
-                                    meta.nextStatus!,
-                                    meta.nextStatus === 'entrega' &&
-                                      order.deliveryMode === 'entrega'
-                                      ? order.courierId ?? defaultCourierId
-                                      : order.courierId,
-                                  )
-                                }
-                                className="px-3 py-1.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-md"
-                              >
-                                {meta.nextLabel}
-                              </button>
+                              meta.nextStatus === 'finalizado' && order.status === 'entrega' ? (
+                                confirmFinalizeOrderId === order.id ? (
+                                  <div className="inline-flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        setConfirmFinalizeOrderId(null);
+                                        await onUpdateOrderStatus(
+                                          order.id,
+                                          'finalizado',
+                                          order.courierId,
+                                        );
+                                      }}
+                                      className="px-2.5 py-1.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-md"
+                                    >
+                                      Confirmar Entregue?
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmFinalizeOrderId(null)}
+                                      className="px-2 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-md"
+                                    >
+                                      Não
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmFinalizeOrderId(order.id)}
+                                    className="px-3 py-1.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-md"
+                                  >
+                                    {meta.nextLabel}
+                                  </button>
+                                )
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    onUpdateOrderStatus(
+                                      order.id,
+                                      meta.nextStatus!,
+                                      meta.nextStatus === 'entrega' &&
+                                        order.deliveryMode === 'entrega'
+                                        ? order.courierId ?? defaultCourierId
+                                        : order.courierId,
+                                    )
+                                  }
+                                  className="px-3 py-1.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-md"
+                                >
+                                  {meta.nextLabel}
+                                </button>
+                              )
                             )}
                           </div>
                         </td>

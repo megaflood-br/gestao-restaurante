@@ -78,6 +78,9 @@ export function CouriersReportsSection({
   const [courierPixKey, setCourierPixKey] = useState('');
   const [addingCourier, setAddingCourier] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmDeliverOrderId, setConfirmDeliverOrderId] = useState<string | null>(
+    null,
+  );
   const [origin, setOrigin] = useState('');
   const [copiedPortalLink, setCopiedPortalLink] = useState(false);
 
@@ -880,33 +883,64 @@ export function CouriersReportsSection({
                             Pedidos atribuídos em rota ({activeOrders.length})
                           </p>
                           <div className="divide-y divide-slate-200 dark:divide-slate-800">
-                            {activeOrders.map((order) => (
-                              <div
-                                key={order.id}
-                                className="py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
-                              >
-                                <div>
-                                  <span className="font-mono-tabular font-bold text-slate-900 dark:text-white">
-                                    #{order.orderNumber}
-                                  </span>{' '}
-                                  · {order.customerName} · {order.address} ({order.neighborhood})
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    onUpdateOrderStatus(
-                                      order.id,
-                                      'finalizado',
-                                      courier.id,
-                                    )
-                                  }
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-md self-start sm:self-auto whitespace-nowrap"
+                            {activeOrders.map((order) => {
+                              const confirmingDeliver =
+                                confirmDeliverOrderId === order.id;
+                              return (
+                                <div
+                                  key={order.id}
+                                  className="py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
                                 >
-                                  <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" />
-                                  <span>Confirmar Entrega</span>
-                                </button>
-                              </div>
-                            ))}
+                                  <div>
+                                    <span className="font-mono-tabular font-bold text-slate-900 dark:text-white">
+                                      #{order.orderNumber}
+                                    </span>{' '}
+                                    · {order.customerName} · {order.address} (
+                                    {order.neighborhood})
+                                  </div>
+                                  {confirmingDeliver ? (
+                                    <div className="inline-flex items-center gap-1.5 self-start sm:self-auto">
+                                      <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+                                        Marcar entregue?
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          setConfirmDeliverOrderId(null);
+                                          await onUpdateOrderStatus(
+                                            order.id,
+                                            'finalizado',
+                                            courier.id,
+                                          );
+                                        }}
+                                        className="px-2.5 py-1 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-md whitespace-nowrap"
+                                      >
+                                        Sim, Entregue
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setConfirmDeliverOrderId(null)}
+                                        className="px-2 py-1 text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md whitespace-nowrap"
+                                      >
+                                        Cancelar
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeliverOrderId(order.id)}
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-md self-start sm:self-auto whitespace-nowrap"
+                                    >
+                                      <CheckCircle2
+                                        className="w-3.5 h-3.5"
+                                        aria-hidden="true"
+                                      />
+                                      <span>Confirmar Entrega</span>
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       )}

@@ -38,6 +38,7 @@ export function OrderDetailDrawer({
 }: OrderDetailDrawerProps) {
   const [selectedCourierId, setSelectedCourierId] = useState('');
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmFinalize, setConfirmFinalize] = useState(false);
 
   useEffect(() => {
     if (order) {
@@ -48,6 +49,7 @@ export function OrderDetailDrawer({
           '',
       );
       setConfirmCancel(false);
+      setConfirmFinalize(false);
     }
   }, [order, couriers]);
 
@@ -290,13 +292,42 @@ export function OrderDetailDrawer({
             )}
 
             {statusMeta.nextStatus && (
-              <button
-                type="button"
-                onClick={handleAdvance}
-                className="px-4 py-2 text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg whitespace-nowrap"
-              >
-                {statusMeta.nextLabel}
-              </button>
+              statusMeta.nextStatus === 'finalizado' && order.status === 'entrega' ? (
+                confirmFinalize ? (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleAdvance}
+                      className="px-3.5 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg whitespace-nowrap"
+                    >
+                      Confirmar Entregue?
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmFinalize(false)}
+                      className="px-2.5 py-2 text-xs text-slate-600 dark:text-slate-300 hover:underline"
+                    >
+                      Voltar
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmFinalize(true)}
+                    className="px-4 py-2 text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg whitespace-nowrap"
+                  >
+                    {statusMeta.nextLabel}
+                  </button>
+                )
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleAdvance}
+                  className="px-4 py-2 text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg whitespace-nowrap"
+                >
+                  {statusMeta.nextLabel}
+                </button>
+              )
             )}
           </div>
         )}
