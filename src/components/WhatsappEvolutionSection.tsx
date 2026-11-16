@@ -5,6 +5,7 @@ import {
   Bot,
   CheckCheck,
   CheckCircle2,
+  KeyRound,
   Link2,
   MessageSquare,
   Plus,
@@ -60,10 +61,11 @@ interface ConversationThreadSummary {
 const BRENDA_AVATAR_URL = '/images/avatar_brenda_atendente_1794784551375.jpg';
 
 const SIMULATED_PRESETS = [
-  'Oi! Quero fazer um pedido para o almoço',
-  'Quero 1 Strogonoff e 1 Suco de Laranja para entregar na Rua Vergueiro 900, Vila Mariana, pago no Pix',
-  'Vocês têm algum cupom de desconto hoje?',
-  'Cadê meu pedido #1041?',
+  'Oi, tudo bem?',
+  'Pode me mandar o cardápio de hoje?',
+  'Quero 1 Strogonoff de Carne',
+  'Para entregar na Rua Vergueiro, 900',
+  'Vou pagar no Pix',
   'Quero falar com um atendente humano',
 ];
 
@@ -132,8 +134,25 @@ export function WhatsappEvolutionSection({
 
   const [envStatus, setEnvStatus] = useState<{
     evolutionConfigured: boolean;
+    evolutionApiUrl: string;
+    evolutionKeyPreview: string;
     openAiConfigured: boolean;
-  }>({ evolutionConfigured: false, openAiConfigured: false });
+    openAiModel: string;
+    openAiKeyPreview: string;
+  }>({
+    evolutionConfigured: false,
+    evolutionApiUrl: '',
+    evolutionKeyPreview: '',
+    openAiConfigured: false,
+    openAiModel: 'gpt-4o-mini',
+    openAiKeyPreview: '',
+  });
+
+  // Panel API Credentials form state (no .env required)
+  const [evolutionApiUrlInput, setEvolutionApiUrlInput] = useState('');
+  const [evolutionApiKeyInput, setEvolutionApiKeyInput] = useState('');
+  const [openAiApiKeyInput, setOpenAiApiKeyInput] = useState('');
+  const [openAiModelInput, setOpenAiModelInput] = useState('gpt-4o-mini');
 
   const [qrBase64, setQrBase64] = useState<string | null>(null);
   const [statusFeedback, setStatusFeedback] = useState('');
@@ -177,6 +196,12 @@ export function WhatsappEvolutionSection({
       .then((data) => {
         if (data?.envStatus) {
           setEnvStatus(data.envStatus);
+          if (data.envStatus.evolutionApiUrl) {
+            setEvolutionApiUrlInput(data.envStatus.evolutionApiUrl);
+          }
+          if (data.envStatus.openAiModel) {
+            setOpenAiModelInput(data.envStatus.openAiModel);
+          }
         }
       })
       .catch(() => {});
@@ -317,6 +342,71 @@ export function WhatsappEvolutionSection({
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     await persistQuickConfig();
+  };
+
+  const handleSaveApiCredentials = async (
+    e?: React.FormEvent,
+    clearFlags?: { clearEvolutionKey?: boolean; clearOpenAiKey?: boolean },
+  ) => {
+    e?.preventDefault();
+    setBusyAction('save_api_credentials');
+    setStatusFeedback('');
+    try {
+      const res = await fetch('/api/evolution/instance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save_api_credentials',
+          evolutionApiUrl: evolutionApiUrlInput,
+          evolutionApiKey: evolutionApiKeyInput,
+          openAiApiKey: openAiApiKeyInput,
+          openAiModel: openAiModelInput,
+          clearEvolutionKey: clearFlags?.clearEvolutionKey,
+          clearOpenAiKey: clearFlags?.clearOpenAiKey,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        envStatus?: typeof envStatus;
+        error?: string;
+      };
+      if (data.ok && data.envStatus) {
+        setEnvStatus(data.envStatus);
+        setEvolutionApiKeyInput('');
+        setOpenAiApiKeyInput('');
+        setStatusFeedback(
+          'Credenciais da OpenAI e Evolution API salvas no servidor do painel.',
+        );
+      } else {
+        setStatusFeedback(data.error || 'Erro ao salvar credenciais.');
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleTestApiConnection = async (target: 'test_openai' | 'test_evolution') => {
+    setBusyAction(target);
+    setStatusFeedback('');
+    try {
+      const res = await fetch('/api/evolution/instance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: target }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        message?: string;
+        error?: string;
+      };
+      setStatusFeedback(
+        data.ok
+          ? data.message || 'Conexão validada com sucesso.'
+          : data.error || 'Falha ao testar conexão.',
+      );
+    } finally {
+      setBusyAction(null);
+    }
   };
 
   const handleInstanceAction = async (
@@ -564,6 +654,15 @@ export function WhatsappEvolutionSection({
                 <SlidersHorizontal className="w-4 h-4" aria-hidden="true" />
                 <span>Personalizar atendente</span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('conexao_eventos')}
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
+              >
+                <KeyRound className="w-4 h-4" aria-hidden="true" />
+                <span>Configurar APIs</span>
+              </button>
             </div>
           </div>
 
@@ -702,8 +801,8 @@ export function WhatsappEvolutionSection({
               </p>
               <p className="mt-1 text-xs text-slate-500 truncate">
                 {envStatus.openAiConfigured
-                  ? 'OpenAI GPT ativo'
-                  : 'Motor Brendi local ativo'}
+                  ? `OpenAI (${envStatus.openAiModel}) ativa`
+                  : 'Motor local · Configure OpenAI no painel'}
               </p>
             </div>
           </div>
@@ -726,7 +825,7 @@ export function WhatsappEvolutionSection({
             },
             {
               id: 'conexao_eventos',
-              label: 'Conexão WhatsApp & Eventos',
+              label: 'APIs, Conexão WhatsApp & Eventos',
               icon: QrCode,
             },
           ] as const
@@ -1455,9 +1554,217 @@ export function WhatsappEvolutionSection({
         </form>
       )}
 
-      {/* TAB 3: CONEXÃO EVOLUTION API & EVENTOS */}
+      {/* TAB 3: CONFIGURAÇÃO DE APIS, CONEXÃO EVOLUTION API & EVENTOS */}
       {activeTab === 'conexao_eventos' && (
         <div className="space-y-6">
+          {/* Panel-based OpenAI & Evolution API Credentials */}
+          <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                  <span>Credenciais de APIs (OpenAI & Evolution API v2)</span>
+                </h2>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  Configure suas chaves diretamente aqui pelo painel. Elas ficam armazenadas apenas no servidor, sem precisar editar arquivos .env.
+                </p>
+              </div>
+              <div className="flex items-center gap-3 text-xs shrink-0">
+                <span
+                  className={`font-semibold ${
+                    envStatus.openAiConfigured
+                      ? 'text-emerald-700 dark:text-emerald-400'
+                      : 'text-slate-500'
+                  }`}
+                >
+                  OpenAI: {envStatus.openAiConfigured ? 'Conectada' : 'Não configurada'}
+                </span>
+                <span className="text-slate-300 dark:text-slate-700">·</span>
+                <span
+                  className={`font-semibold ${
+                    envStatus.evolutionConfigured
+                      ? 'text-emerald-700 dark:text-emerald-400'
+                      : 'text-slate-500'
+                  }`}
+                >
+                  Evolution: {envStatus.evolutionConfigured ? 'Configurada' : 'Simulador'}
+                </span>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveApiCredentials} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* OpenAI Card */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3.5">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-xs font-bold text-slate-900 dark:text-white">
+                    OpenAI (Atendente {displayName})
+                  </h3>
+                  {envStatus.openAiConfigured && (
+                    <span className="text-[11px] font-mono-tabular text-emerald-700 dark:text-emerald-400">
+                      Ativa: {envStatus.openAiKeyPreview}
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="panel-openai-key"
+                    className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                  >
+                    OpenAI API Key
+                  </label>
+                  <input
+                    id="panel-openai-key"
+                    type="password"
+                    value={openAiApiKeyInput}
+                    onChange={(e) => setOpenAiApiKeyInput(e.target.value)}
+                    placeholder={
+                      envStatus.openAiConfigured
+                        ? `Salva (${envStatus.openAiKeyPreview}) — digite para substituir`
+                        : 'sk-proj-...'
+                    }
+                    className="w-full px-3 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="panel-openai-model"
+                    className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                  >
+                    Modelo OpenAI
+                  </label>
+                  <select
+                    id="panel-openai-model"
+                    value={openAiModelInput}
+                    onChange={(e) => setOpenAiModelInput(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                  >
+                    <option value="gpt-4o-mini">gpt-4o-mini (Rápido e econômico)</option>
+                    <option value="gpt-4o">gpt-4o (Máxima precisão)</option>
+                    <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                    <option value="gpt-4.1">gpt-4.1</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={busyAction !== null}
+                    onClick={() => handleTestApiConnection('test_openai')}
+                    className="px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+                  >
+                    {busyAction === 'test_openai' ? 'Testando...' : 'Testar OpenAI'}
+                  </button>
+                  {envStatus.openAiConfigured && (
+                    <button
+                      type="button"
+                      disabled={busyAction !== null}
+                      onClick={() =>
+                        handleSaveApiCredentials(undefined, { clearOpenAiKey: true })
+                      }
+                      className="px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
+                    >
+                      Remover chave
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Evolution API Card */}
+              <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl space-y-3.5">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-xs font-bold text-slate-900 dark:text-white">
+                    Servidor Evolution API v2
+                  </h3>
+                  {envStatus.evolutionConfigured && (
+                    <span className="text-[11px] font-mono-tabular text-emerald-700 dark:text-emerald-400">
+                      Chave: {envStatus.evolutionKeyPreview}
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="panel-evo-url"
+                    className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                  >
+                    URL Base da Evolution API
+                  </label>
+                  <input
+                    id="panel-evo-url"
+                    type="url"
+                    value={evolutionApiUrlInput}
+                    onChange={(e) => setEvolutionApiUrlInput(e.target.value)}
+                    placeholder="https://api.seudominio.com"
+                    className="w-full px-3 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="panel-evo-key"
+                    className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                  >
+                    Global API Key (apikey)
+                  </label>
+                  <input
+                    id="panel-evo-key"
+                    type="password"
+                    value={evolutionApiKeyInput}
+                    onChange={(e) => setEvolutionApiKeyInput(e.target.value)}
+                    placeholder={
+                      envStatus.evolutionKeyPreview
+                        ? `Salva (${envStatus.evolutionKeyPreview}) — digite para substituir`
+                        : 'Cole a Global API Key da sua Evolution API'
+                    }
+                    className="w-full px-3 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={busyAction !== null}
+                    onClick={() => handleTestApiConnection('test_evolution')}
+                    className="px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+                  >
+                    {busyAction === 'test_evolution'
+                      ? 'Testando...'
+                      : 'Testar Evolution API'}
+                  </button>
+                  {envStatus.evolutionKeyPreview && (
+                    <button
+                      type="button"
+                      disabled={busyAction !== null}
+                      onClick={() =>
+                        handleSaveApiCredentials(undefined, { clearEvolutionKey: true })
+                      }
+                      className="px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
+                    >
+                      Remover chave
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="lg:col-span-2 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={busyAction !== null}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg disabled:opacity-60"
+                >
+                  <Save className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>
+                    {busyAction === 'save_api_credentials'
+                      ? 'Salvando...'
+                      : 'Salvar Credenciais das APIs'}
+                  </span>
+                </button>
+              </div>
+            </form>
+          </section>
+
           <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-5">
             <div className="flex items-start justify-between gap-4">
               <div>

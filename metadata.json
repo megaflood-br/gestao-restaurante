@@ -1,6 +1,8 @@
 {
-  "name": "Vértice Gestão",
-  "description": "Sistema modular em Next.js e TypeScript para gestão de projetos, clientes, financeiro e equipe.",
+  "name": "Gestão Delivery",
+  "description": "Sistema modular em Next.js e TypeScript para gestão de pedidos, clientes, financeiro e equipe.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

@@ -17,13 +17,13 @@ const ibmPlexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Vértice Gestão',
+  title: 'Gestão Delivery',
   description:
-    'Sistema modular em Next.js e TypeScript para gestão de projetos, clientes, financeiro e equipe.',
+    'Sistema modular em Next.js e TypeScript para gestão de pedidos, clientes, financeiro e equipe.',
   openGraph: {
-    title: 'Vértice Gestão',
+    title: 'Gestão Delivery',
     description:
-      'Sistema modular em Next.js e TypeScript para gestão de projetos, clientes, financeiro e equipe.',
+      'Sistema modular em Next.js e TypeScript para gestão de pedidos, clientes, financeiro e equipe.',
     type: 'website',
   },
 };

@@ -1,3 +1,5 @@
+import { getDeliveryStore, getRuntimeApiCredentials } from '@/lib/server-store';
+
 export interface EvolutionEnvConfig {
   baseUrl: string;
   apiKey: string;
@@ -6,9 +8,12 @@ export interface EvolutionEnvConfig {
 }
 
 export function getEvolutionEnvConfig(): EvolutionEnvConfig {
-  const baseUrl = (process.env.EVOLUTION_API_URL ?? '').trim().replace(/\/+$/, '');
-  const apiKey = (process.env.EVOLUTION_API_KEY ?? '').trim();
+  const creds = getRuntimeApiCredentials();
+  const db = getDeliveryStore();
+  const baseUrl = creds.evolutionApiUrl.trim().replace(/\/+$/, '');
+  const apiKey = creds.evolutionApiKey.trim();
   const defaultInstance =
+    db.store.evolution.instanceName?.trim() ||
     (process.env.EVOLUTION_INSTANCE_NAME ?? 'casa-do-tempero').trim() ||
     'casa-do-tempero';
 

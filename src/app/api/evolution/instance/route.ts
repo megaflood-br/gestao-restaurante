@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDeliveryStore } from '@/lib/server-store';
+import {
+  getDeliveryStore,
+  getRuntimeApiCredentials,
+  maskSecret,
+  updateRuntimeApiCredentials,
+} from '@/lib/server-store';
 import {
   connectEvolutionInstance,
   createEvolutionInstance,
@@ -9,22 +14,32 @@ import {
   setEvolutionWebhook,
 } from '@/lib/evolution-client';
 import { formatCurrencyBRL } from '@/lib/formatters';
-import { isOpenAiConfigured } from '@/lib/whatsapp-bot';
+import { getOpenAiRuntimeConfig } from '@/lib/whatsapp-bot';
 import type { BotTone, EvolutionTemplates } from '@/types/delivery';
+
+function buildEnvStatusPayload() {
+  const env = getEvolutionEnvConfig();
+  const openAi = getOpenAiRuntimeConfig();
+  const raw = getRuntimeApiCredentials();
+  return {
+    evolutionConfigured: env.isConfigured,
+    evolutionApiUrl: raw.evolutionApiUrl,
+    evolutionKeyPreview: maskSecret(raw.evolutionApiKey),
+    openAiConfigured: openAi.isConfigured,
+    openAiModel: openAi.model,
+    openAiKeyPreview: maskSecret(raw.openAiApiKey),
+    defaultInstance: env.defaultInstance,
+  };
+}
 
 export async function GET() {
   const db = getDeliveryStore();
-  const env = getEvolutionEnvConfig();
 
   return NextResponse.json({
     ok: true,
     evolution: db.store.evolution,
     whatsappLogs: db.whatsappLogs,
-    envStatus: {
-      evolutionConfigured: env.isConfigured,
-      openAiConfigured: isOpenAiConfigured(),
-      defaultInstance: env.defaultInstance,
-    },
+    envStatus: buildEnvStatusPayload(),
   });
 }
 
@@ -39,7 +54,10 @@ export async function POST(request: NextRequest) {
         | 'update_config'
         | 'send_manual'
         | 'toggle_handoff'
-        | 'send_recovery';
+        | 'send_recovery'
+        | 'save_api_credentials'
+        | 'test_openai'
+        | 'test_evolution';
       instanceName?: string;
       autoReplyEnabled?: boolean;
       autoNotifyOnStatus?: boolean;
@@ -54,6 +72,12 @@ export async function POST(request: NextRequest) {
       customerName?: string;
       message?: string;
       couponCode?: string;
+      evolutionApiUrl?: string;
+      evolutionApiKey?: string;
+      openAiApiKey?: string;
+      openAiModel?: string;
+      clearEvolutionKey?: boolean;
+      clearOpenAiKey?: boolean;
     };
 
     const db = getDeliveryStore();
@@ -64,6 +88,112 @@ export async function POST(request: NextRequest) {
       db.store.evolution.instanceName = body.instanceName.trim();
     }
     const instanceName = db.store.evolution.instanceName;
+
+    if (body.action === 'save_api_credentials') {
+      updateRuntimeApiCredentials({
+        evolutionApiUrl: body.evolutionApiUrl,
+        evolutionApiKey: body.evolutionApiKey,
+        openAiApiKey: body.openAiApiKey,
+        openAiModel: body.openAiModel,
+        clearEvolutionKey: body.clearEvolutionKey,
+        clearOpenAiKey: body.clearOpenAiKey,
+      });
+      return NextResponse.json({
+        ok: true,
+        envStatus: buildEnvStatusPayload(),
+      });
+    }
+
+    if (body.action === 'test_openai') {
+      const openAi = getOpenAiRuntimeConfig();
+      if (!openAi.isConfigured) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: 'Informe e salve uma chave da OpenAI antes de testar.',
+          },
+          { status: 400 },
+        );
+      }
+
+      try {
+        const res = await fetch('https://api.openai.com/v1/models', {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${openAi.apiKey}`,
+          },
+        });
+        if (!res.ok) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: `OpenAI retornou HTTP ${res.status}. Verifique se a chave está correta e ativa.`,
+            },
+            { status: 400 },
+          );
+        }
+        return NextResponse.json({
+          ok: true,
+          message: `Conexão com OpenAI validada! Modelo selecionado: ${openAi.model}.`,
+        });
+      } catch (err) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              err instanceof Error
+                ? err.message
+                : 'Falha de rede ao testar OpenAI.',
+          },
+          { status: 400 },
+        );
+      }
+    }
+
+    if (body.action === 'test_evolution') {
+      const evoCfg = getEvolutionEnvConfig();
+      if (!evoCfg.isConfigured) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              'Informe e salve a URL e a API Key da Evolution API antes de testar.',
+          },
+          { status: 400 },
+        );
+      }
+
+      try {
+        const res = await fetch(`${evoCfg.baseUrl}/instance/fetchInstances`, {
+          method: 'GET',
+          headers: { apikey: evoCfg.apiKey },
+        });
+        if (!res.ok) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: `Evolution API retornou HTTP ${res.status}. Verifique a URL e a API Key.`,
+            },
+            { status: 400 },
+          );
+        }
+        return NextResponse.json({
+          ok: true,
+          message: `Servidor Evolution API respondendo normalmente em ${evoCfg.baseUrl}.`,
+        });
+      } catch (err) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              err instanceof Error
+                ? err.message
+                : 'Não foi possível alcançar o servidor da Evolution API.',
+          },
+          { status: 400 },
+        );
+      }
+    }
 
     if (body.action === 'connect') {
       if (env.isConfigured) {
