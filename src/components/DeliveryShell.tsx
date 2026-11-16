@@ -17,6 +17,7 @@ import {
   Sun,
   Tags,
   UtensilsCrossed,
+  Wallet,
   X,
 } from 'lucide-react';
 import { INITIAL_DELIVERY_STATE } from '@/lib/delivery-seed';
@@ -24,12 +25,14 @@ import {
   applyOrderStockDeduction,
   reverseOrderStockDeduction,
 } from '@/lib/stock-engine';
+import { getCurrentMonthKey } from '@/lib/finance-engine';
 import { DigitalMenuSection } from '@/components/DigitalMenuSection';
 import { OrdersManagerSection } from '@/components/OrdersManagerSection';
 import { WhatsappEvolutionSection } from '@/components/WhatsappEvolutionSection';
 import { CatalogCouponsSection } from '@/components/CatalogCouponsSection';
 import { StockTechnicalSheetSection } from '@/components/StockTechnicalSheetSection';
 import { CouriersReportsSection } from '@/components/CouriersReportsSection';
+import { CostsFinanceSection } from '@/components/CostsFinanceSection';
 import {
   SettingsSection,
   type SettingsTabId,
@@ -41,10 +44,12 @@ import type {
   DeliveryModuleId,
   DeliveryStoreState,
   EvolutionConfig,
+  FinancialEntry,
   MenuCategory,
   MenuItem,
   Order,
   OrderStatus,
+  RecurringExpense,
   StockIngredient,
   StockMovement,
   StoreSettings,
@@ -85,6 +90,7 @@ const NAV_GROUPS: NavGroup[] = [
     groupLabel: 'Análise e Ajustes',
     items: [
       { id: 'desempenho', label: 'Desempenho', icon: BarChart3 },
+      { id: 'custos', label: 'Custos e Fluxo', icon: Wallet },
       { id: 'configuracoes', label: 'Configurações', icon: Settings },
     ],
   },
@@ -151,6 +157,12 @@ export function DeliveryShell() {
               stockMovements: Array.isArray(parsed.stockMovements)
                 ? parsed.stockMovements
                 : INITIAL_DELIVERY_STATE.stockMovements,
+              financialEntries: Array.isArray(parsed.financialEntries)
+                ? parsed.financialEntries
+                : INITIAL_DELIVERY_STATE.financialEntries,
+              recurringExpenses: Array.isArray(parsed.recurringExpenses)
+                ? parsed.recurringExpenses
+                : INITIAL_DELIVERY_STATE.recurringExpenses,
             });
             return;
           }
@@ -604,6 +616,115 @@ export function DeliveryShell() {
     }).catch(() => {});
   };
 
+  const handleAddFinancialEntry = (entry: FinancialEntry) => {
+    persistState((prev) => ({
+      ...prev,
+      financialEntries: [entry, ...prev.financialEntries],
+    }));
+  };
+
+  const handleDeleteFinancialEntry = (id: string) => {
+    persistState((prev) => ({
+      ...prev,
+      financialEntries: prev.financialEntries.filter((e) => e.id !== id),
+    }));
+    fetch('/api/finance', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entity: 'entry', id }),
+    }).catch(() => {});
+  };
+
+  const handleAddRecurringExpense = (recurring: RecurringExpense) => {
+    persistState((prev) => ({
+      ...prev,
+      recurringExpenses: [recurring, ...prev.recurringExpenses],
+    }));
+  };
+
+  const handleUpdateRecurringExpense = (
+    id: string,
+    updates: Partial<RecurringExpense>,
+  ) => {
+    persistState((prev) => ({
+      ...prev,
+      recurringExpenses: prev.recurringExpenses.map((r) =>
+        r.id === id ? { ...r, ...updates } : r,
+      ),
+    }));
+    fetch('/api/finance', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, updates }),
+    }).catch(() => {});
+  };
+
+  const handleDeleteRecurringExpense = (id: string) => {
+    persistState((prev) => ({
+      ...prev,
+      recurringExpenses: prev.recurringExpenses.filter((r) => r.id !== id),
+    }));
+    fetch('/api/finance', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entity: 'recurring', id }),
+    }).catch(() => {});
+  };
+
+  const handleLaunchRecurringExpenses = async (options: {
+    recurringId?: string;
+    launchAllPending?: boolean;
+  }) => {
+    const monthKey = getCurrentMonthKey();
+    const now = new Date().toISOString();
+    const today = now.slice(0, 10);
+
+    persistState((prev) => {
+      const targets = options.launchAllPending
+        ? prev.recurringExpenses.filter(
+            (r) => r.active && r.lastLaunchedMonth !== monthKey,
+          )
+        : prev.recurringExpenses.filter((r) => r.id === options.recurringId);
+      if (targets.length === 0) return prev;
+
+      const launchedIds = new Set<string>();
+      const created: FinancialEntry[] = targets.map((rec, idx) => {
+        launchedIds.add(rec.id);
+        return {
+          id: `fin-rec-${rec.id}-${Date.now()}-${idx}`,
+          type: 'custo',
+          category: rec.category,
+          description: `${rec.name} (${monthKey})`,
+          amount: rec.amount,
+          date: today,
+          paymentMethod: 'Débito / Pix',
+          recurringExpenseId: rec.id,
+          notes: `Lançado a partir do gasto recorrente (venc. dia ${rec.dueDay})`,
+          createdAt: now,
+        };
+      });
+
+      return {
+        ...prev,
+        financialEntries: [...created, ...prev.financialEntries],
+        recurringExpenses: prev.recurringExpenses.map((r) =>
+          launchedIds.has(r.id) ? { ...r, lastLaunchedMonth: monthKey } : r,
+        ),
+      };
+    });
+
+    await fetch('/api/finance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'launch_recurring',
+        recurringId: options.recurringId,
+        launchAllPending: options.launchAllPending,
+        monthKey,
+      }),
+    }).catch(() => {});
+  };
+
   const pendingOrdersCount = state.orders.filter(
     (o) => o.status === 'pendente',
   ).length;
@@ -946,6 +1067,16 @@ export function DeliveryShell() {
               onAddCourier={handleAddCourier}
               onUpdateCourier={handleUpdateCourier}
               onUpdateOrderStatus={handleUpdateOrderStatus}
+            />
+          ) : activeModule === 'custos' ? (
+            <CostsFinanceSection
+              state={state}
+              onAddEntry={handleAddFinancialEntry}
+              onDeleteEntry={handleDeleteFinancialEntry}
+              onAddRecurring={handleAddRecurringExpense}
+              onUpdateRecurring={handleUpdateRecurringExpense}
+              onDeleteRecurring={handleDeleteRecurringExpense}
+              onLaunchRecurring={handleLaunchRecurringExpenses}
             />
           ) : (
             <SettingsSection

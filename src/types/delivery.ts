@@ -7,6 +7,7 @@ export type DeliveryModuleId =
   | 'estoque'
   | 'vitrine'
   | 'desempenho'
+  | 'custos'
   | 'configuracoes';
 
 export type OrderStatus =
@@ -253,6 +254,43 @@ export interface WhatsappSessionMessage {
   at: string;
 }
 
+export type FinancialEntryType = 'entrada' | 'custo';
+
+export type FinancialCategory =
+  | 'vendas_extras'
+  | 'insumos_compras'
+  | 'aluguel_infra'
+  | 'utilidades'
+  | 'equipe_entregas'
+  | 'marketing_taxas'
+  | 'outros';
+
+export interface FinancialEntry {
+  id: string;
+  type: FinancialEntryType;
+  category: FinancialCategory;
+  description: string;
+  amount: number;
+  date: string;
+  paymentMethod?: string;
+  recurringExpenseId?: string;
+  notes?: string;
+  createdAt: string;
+}
+
+export type RecurringFrequency = 'mensal' | 'quinzenal' | 'semanal';
+
+export interface RecurringExpense {
+  id: string;
+  name: string;
+  category: FinancialCategory;
+  amount: number;
+  dueDay: number;
+  frequency: RecurringFrequency;
+  active: boolean;
+  lastLaunchedMonth?: string;
+}
+
 export interface DeliveryStoreState {
   store: StoreSettings;
   categories: MenuCategory[];
@@ -263,4 +301,6 @@ export interface DeliveryStoreState {
   whatsappLogs: WhatsappLog[];
   ingredients: StockIngredient[];
   stockMovements: StockMovement[];
+  financialEntries: FinancialEntry[];
+  recurringExpenses: RecurringExpense[];
 }
