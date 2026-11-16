@@ -8,6 +8,8 @@ export const INITIAL_DELIVERY_STATE: DeliveryStoreState = {
       'Refeições executivas preparadas na hora com ingredientes frescos, grelhados na brasa e entrega rápida para almoço e jantar.',
     isOpen: true,
     openingHours: 'Seg a Sáb · 10:30 às 22:00',
+    autoScheduleEnabled: true,
+    timezone: 'America/Sao_Paulo',
     phone: '(11) 98420-3310',
     address: 'Rua Vergueiro, 1480',
     neighborhood: 'Vila Mariana, São Paulo',

@@ -28,6 +28,12 @@ import {
 } from 'lucide-react';
 import { formatCurrencyBRL, formatTimeBR } from '@/lib/formatters';
 import { readAndCompressImage } from '@/lib/image-upload';
+import {
+  formatOpeningScheduleLabel,
+  getStoreAvailability,
+  parseOpeningHoursString,
+  WEEKDAY_OPTIONS,
+} from '@/lib/store-hours';
 import type {
   BotTone,
   DeliveryFeeMode,
@@ -36,6 +42,7 @@ import type {
   EvolutionConfig,
   EvolutionTemplates,
   NeighborhoodFeeRule,
+  StoreHourShift,
   StoreSettings,
 } from '@/types/delivery';
 
@@ -145,10 +152,27 @@ export function SettingsSection({
   }, [initialTab]);
 
   // Store settings state
+  const initialParsedHours = parseOpeningHoursString(store.openingHours);
+  const initialDays =
+    store.openingSchedule?.days ?? initialParsedHours?.days ?? [1, 2, 3, 4, 5, 6];
+  const initialShifts = store.openingSchedule?.shifts ??
+    initialParsedHours?.shifts.map((s) => ({ open: s.open, close: s.close })) ?? [
+      { open: '11:00', close: '15:00' },
+    ];
+
   const [name, setName] = useState(store.name);
   const [segment, setSegment] = useState(store.segment);
   const [description, setDescription] = useState(store.description);
   const [openingHours, setOpeningHours] = useState(store.openingHours);
+  const [autoScheduleEnabled, setAutoScheduleEnabled] = useState(
+    store.autoScheduleEnabled !== false,
+  );
+  const [scheduleDays, setScheduleDays] = useState<number[]>(initialDays);
+  const [shift1Open, setShift1Open] = useState(initialShifts[0]?.open ?? '11:00');
+  const [shift1Close, setShift1Close] = useState(initialShifts[0]?.close ?? '15:00');
+  const [shift2Enabled, setShift2Enabled] = useState(initialShifts.length > 1);
+  const [shift2Open, setShift2Open] = useState(initialShifts[1]?.open ?? '18:00');
+  const [shift2Close, setShift2Close] = useState(initialShifts[1]?.close ?? '22:00');
   const [phone, setPhone] = useState(store.phone);
   const [address, setAddress] = useState(store.address);
   const [neighborhood, setNeighborhood] = useState(store.neighborhood);
@@ -272,6 +296,20 @@ export function SettingsSection({
     setSegment(store.segment);
     setDescription(store.description);
     setOpeningHours(store.openingHours);
+    setAutoScheduleEnabled(store.autoScheduleEnabled !== false);
+    const parsed = parseOpeningHoursString(store.openingHours);
+    const nextDays =
+      store.openingSchedule?.days ?? parsed?.days ?? [1, 2, 3, 4, 5, 6];
+    const nextShifts = store.openingSchedule?.shifts ??
+      parsed?.shifts.map((s) => ({ open: s.open, close: s.close })) ?? [
+        { open: '11:00', close: '15:00' },
+      ];
+    setScheduleDays(nextDays);
+    setShift1Open(nextShifts[0]?.open ?? '11:00');
+    setShift1Close(nextShifts[0]?.close ?? '15:00');
+    setShift2Enabled(nextShifts.length > 1);
+    setShift2Open(nextShifts[1]?.open ?? '18:00');
+    setShift2Close(nextShifts[1]?.close ?? '22:00');
     setPhone(store.phone);
     setAddress(store.address);
     setNeighborhood(store.neighborhood);
@@ -353,12 +391,23 @@ export function SettingsSection({
         estimatedMinutes: Math.max(5, Number(n.estimatedMinutes) || 30),
       }));
 
+    const activeShifts: StoreHourShift[] = [{ open: shift1Open, close: shift1Close }];
+    if (shift2Enabled && shift2Open && shift2Close) {
+      activeShifts.push({ open: shift2Open, close: shift2Close });
+    }
+
     try {
       await onUpdateStore({
         name: name.trim() || store.name,
         segment: segment.trim() || store.segment,
         description: description.trim() || store.description,
         openingHours: openingHours.trim(),
+        autoScheduleEnabled,
+        timezone: store.timezone || 'America/Sao_Paulo',
+        openingSchedule: {
+          days: scheduleDays,
+          shifts: activeShifts,
+        },
         phone: phone.trim(),
         address: address.trim(),
         neighborhood: neighborhood.trim(),
@@ -376,11 +425,26 @@ export function SettingsSection({
       setNeighborhoodFees(cleanedNeighborhoods);
       setFeedback({
         type: 'ok',
-        message: 'Logo, dados da loja, capa do cardápio e tabela de taxas salvos com sucesso.',
+        message: 'Logo, dados da loja, horário de funcionamento e taxas salvos com sucesso.',
       });
     } finally {
       setSavingStore(false);
     }
+  };
+
+  const syncScheduleText = (
+    nextDays: number[],
+    s1Open: string,
+    s1Close: string,
+    s2On: boolean,
+    s2Open: string,
+    s2Close: string,
+  ) => {
+    const shifts: StoreHourShift[] = [{ open: s1Open, close: s1Close }];
+    if (s2On && s2Open && s2Close) {
+      shifts.push({ open: s2Open, close: s2Close });
+    }
+    setOpeningHours(formatOpeningScheduleLabel(nextDays, shifts));
   };
 
   const handleCoverFileUpload = async (
@@ -875,7 +939,7 @@ export function SettingsSection({
                         : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800'
                     }`}
                   >
-                    {store.isOpen ? 'Loja Aberta' : 'Loja Fechada'}
+                    {store.isOpen ? 'Operação Liberada' : 'Pausa Manual Ativa'}
                   </button>
                 </div>
 
@@ -928,34 +992,293 @@ export function SettingsSection({
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3.5">
+                    {(() => {
+                      const previewShifts: StoreHourShift[] = [
+                        { open: shift1Open, close: shift1Close },
+                      ];
+                      if (shift2Enabled && shift2Open && shift2Close) {
+                        previewShifts.push({ open: shift2Open, close: shift2Close });
+                      }
+                      const livePreview = getStoreAvailability({
+                        isOpen: store.isOpen,
+                        openingHours,
+                        autoScheduleEnabled,
+                        timezone: store.timezone || 'America/Sao_Paulo',
+                        openingSchedule: {
+                          days: scheduleDays,
+                          shifts: previewShifts,
+                        },
+                      });
+                      return (
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                              <span>Horário de Funcionamento Automático</span>
+                            </p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                              Agora são <strong className="font-mono-tabular">{livePreview.currentTimeLabel}</strong> (Brasília) · Status no cardápio:{' '}
+                              <strong
+                                className={
+                                  livePreview.isOpen
+                                    ? 'text-emerald-700 dark:text-emerald-400'
+                                    : 'text-red-700 dark:text-red-400'
+                                }
+                              >
+                                {livePreview.statusLabel}
+                              </strong>
+                            </p>
+                          </div>
+
+                          <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer shrink-0">
+                            <input
+                              type="checkbox"
+                              checked={autoScheduleEnabled}
+                              onChange={(e) => setAutoScheduleEnabled(e.target.checked)}
+                              className="accent-brand-600 w-4 h-4"
+                            />
+                            <span>Fechar fora do horário</span>
+                          </label>
+                        </div>
+                      );
+                    })()}
+
                     <div>
-                      <label
-                        htmlFor="cfg-store-hours"
-                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-                      >
-                        Horário de Funcionamento
-                      </label>
-                      <input
-                        id="cfg-store-hours"
-                        value={openingHours}
-                        onChange={(e) => setOpeningHours(e.target.value)}
-                        className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-                      />
+                      <p className="text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1.5">
+                        Dias de atendimento
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {WEEKDAY_OPTIONS.map((opt) => {
+                          const active = scheduleDays.includes(opt.day);
+                          return (
+                            <button
+                              key={opt.day}
+                              type="button"
+                              onClick={() => {
+                                const nextDays = active
+                                  ? scheduleDays.filter((d) => d !== opt.day)
+                                  : [...scheduleDays, opt.day].sort((a, b) => a - b);
+                                setScheduleDays(nextDays);
+                                syncScheduleText(
+                                  nextDays,
+                                  shift1Open,
+                                  shift1Close,
+                                  shift2Enabled,
+                                  shift2Open,
+                                  shift2Close,
+                                );
+                              }}
+                              className={`px-2.5 py-1 text-xs font-semibold rounded-md border transition-colors ${
+                                active
+                                  ? 'bg-brand-600 text-white border-brand-600'
+                                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'
+                              }`}
+                            >
+                              {opt.short}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                    <div>
-                      <label
-                        htmlFor="cfg-store-phone"
-                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-                      >
-                        WhatsApp de Contato
-                      </label>
-                      <input
-                        id="cfg-store-phone"
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                        className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-                      />
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
+                      <div>
+                        <label
+                          htmlFor="cfg-shift1-open"
+                          className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1"
+                        >
+                          Abre (1º Turno)
+                        </label>
+                        <input
+                          id="cfg-shift1-open"
+                          type="time"
+                          value={shift1Open}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setShift1Open(v);
+                            syncScheduleText(
+                              scheduleDays,
+                              v,
+                              shift1Close,
+                              shift2Enabled,
+                              shift2Open,
+                              shift2Close,
+                            );
+                          }}
+                          className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                        />
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="cfg-shift1-close"
+                          className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1"
+                        >
+                          Fecha (1º Turno)
+                        </label>
+                        <input
+                          id="cfg-shift1-close"
+                          type="time"
+                          value={shift1Close}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setShift1Close(v);
+                            syncScheduleText(
+                              scheduleDays,
+                              shift1Open,
+                              v,
+                              shift2Enabled,
+                              shift2Open,
+                              shift2Close,
+                            );
+                          }}
+                          className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                        />
+                      </div>
+
+                      {shift2Enabled ? (
+                        <>
+                          <div>
+                            <label
+                              htmlFor="cfg-shift2-open"
+                              className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1"
+                            >
+                              Abre (2º Turno)
+                            </label>
+                            <input
+                              id="cfg-shift2-open"
+                              type="time"
+                              value={shift2Open}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setShift2Open(v);
+                                syncScheduleText(
+                                  scheduleDays,
+                                  shift1Open,
+                                  shift1Close,
+                                  true,
+                                  v,
+                                  shift2Close,
+                                );
+                              }}
+                              className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                            />
+                          </div>
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <label
+                                htmlFor="cfg-shift2-close"
+                                className="text-[11px] font-medium text-slate-600 dark:text-slate-400"
+                              >
+                                Fecha (2º Turno)
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShift2Enabled(false);
+                                  syncScheduleText(
+                                    scheduleDays,
+                                    shift1Open,
+                                    shift1Close,
+                                    false,
+                                    shift2Open,
+                                    shift2Close,
+                                  );
+                                }}
+                                className="text-[10px] text-red-600 hover:underline"
+                              >
+                                Remover
+                              </button>
+                            </div>
+                            <input
+                              id="cfg-shift2-close"
+                              type="time"
+                              value={shift2Close}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setShift2Close(v);
+                                syncScheduleText(
+                                  scheduleDays,
+                                  shift1Open,
+                                  shift1Close,
+                                  true,
+                                  shift2Open,
+                                  v,
+                                );
+                              }}
+                              className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <div className="col-span-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShift2Enabled(true);
+                              syncScheduleText(
+                                scheduleDays,
+                                shift1Open,
+                                shift1Close,
+                                true,
+                                shift2Open,
+                                shift2Close,
+                              );
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-slate-900 border border-brand-200 dark:border-brand-800 hover:bg-brand-50 rounded-lg"
+                          >
+                            <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                            <span>Adicionar 2º turno (ex.: Jantar)</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                      <div>
+                        <label
+                          htmlFor="cfg-store-hours"
+                          className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                        >
+                          Texto Exibido no Cardápio
+                        </label>
+                        <input
+                          id="cfg-store-hours"
+                          value={openingHours}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setOpeningHours(val);
+                            const parsed = parseOpeningHoursString(val);
+                            if (parsed) {
+                              setScheduleDays(parsed.days);
+                              setShift1Open(parsed.shifts[0]?.open ?? shift1Open);
+                              setShift1Close(parsed.shifts[0]?.close ?? shift1Close);
+                              if (parsed.shifts.length > 1) {
+                                setShift2Enabled(true);
+                                setShift2Open(parsed.shifts[1].open);
+                                setShift2Close(parsed.shifts[1].close);
+                              } else {
+                                setShift2Enabled(false);
+                              }
+                            }
+                          }}
+                          className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                        />
+                      </div>
+                      <div>
+                        <label
+                          htmlFor="cfg-store-phone"
+                          className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                        >
+                          WhatsApp de Contato
+                        </label>
+                        <input
+                          id="cfg-store-phone"
+                          value={phone}
+                          onChange={(e) => setPhone(e.target.value)}
+                          className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                        />
+                      </div>
                     </div>
                   </div>
 

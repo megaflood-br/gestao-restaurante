@@ -10,6 +10,7 @@ import {
   reverseOrderStockDeduction,
 } from '@/lib/stock-engine';
 import { calculateDeliveryQuote } from '@/lib/delivery-pricing';
+import { getStoreAvailability } from '@/lib/store-hours';
 import { formatCurrencyBRL } from '@/lib/formatters';
 import type {
   DeliveryMode,
@@ -62,9 +63,15 @@ export async function POST(request: NextRequest) {
     const body = (await request.json()) as CreateOrderPayload;
     const db = getDeliveryStore();
 
-    if (!db.store.isOpen && body.source !== 'balcao') {
+    const availability = getStoreAvailability(db.store);
+    if (!availability.isOpen && body.source !== 'balcao') {
       return NextResponse.json(
-        { ok: false, error: 'A loja está fechada para novos pedidos no momento.' },
+        {
+          ok: false,
+          error:
+            availability.closedReason ||
+            'A loja está fechada para novos pedidos no momento.',
+        },
         { status: 400 },
       );
     }

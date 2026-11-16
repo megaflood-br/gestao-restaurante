@@ -26,6 +26,7 @@ import {
   reverseOrderStockDeduction,
 } from '@/lib/stock-engine';
 import { getCurrentMonthKey } from '@/lib/finance-engine';
+import { getStoreAvailability } from '@/lib/store-hours';
 import { DigitalMenuSection } from '@/components/DigitalMenuSection';
 import { OrdersManagerSection } from '@/components/OrdersManagerSection';
 import { WhatsappEvolutionSection } from '@/components/WhatsappEvolutionSection';
@@ -106,6 +107,12 @@ export function DeliveryShell() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [origin, setOrigin] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowTick(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     setIsDark(document.documentElement.classList.contains('dark'));
@@ -937,17 +944,36 @@ export function DeliveryShell() {
           </div>
 
           <div className="flex items-center gap-2.5 shrink-0">
-            <button
-              type="button"
-              onClick={handleToggleStoreOpen}
-              className={`px-3.5 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
-                state.store.isOpen
-                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800'
-                  : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800'
-              }`}
-            >
-              {state.store.isOpen ? 'Loja Aberta' : 'Loja Fechada'}
-            </button>
+            {(() => {
+              const availability = getStoreAvailability(
+                state.store,
+                new Date(nowTick),
+              );
+              return (
+                <button
+                  type="button"
+                  onClick={
+                    availability.statusMode === 'closed_schedule'
+                      ? () => openSettingsAt('loja')
+                      : handleToggleStoreOpen
+                  }
+                  title={
+                    availability.statusMode === 'closed_schedule'
+                      ? `Fora do horário (${state.store.openingHours}). Clique para configurar horários.`
+                      : 'Alternar abertura manual da loja'
+                  }
+                  className={`px-3.5 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
+                    availability.isOpen
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800'
+                      : availability.statusMode === 'closed_schedule'
+                        ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800'
+                        : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800'
+                  }`}
+                >
+                  {availability.adminBadgeLabel}
+                </button>
+              );
+            })()}
           </div>
         </header>
 

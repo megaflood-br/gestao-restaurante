@@ -1,6 +1,7 @@
 import { formatCurrencyBRL, ORDER_STATUS_META } from '@/lib/formatters';
 import { getRuntimeApiCredentials } from '@/lib/server-store';
 import { applyOrderStockDeduction } from '@/lib/stock-engine';
+import { getStoreAvailability } from '@/lib/store-hours';
 import type {
   DeliveryMode,
   DeliveryStoreState,
@@ -84,11 +85,14 @@ function createOrderFromBot(params: {
 } {
   const { state, customerPhone, customerName, args } = params;
 
-  if (!state.store.isOpen) {
+  const availability = getStoreAvailability(state.store);
+  if (!availability.isOpen) {
     return {
       ok: false,
       stockMovements: [],
-      error: `A loja está fechada no momento. Horário: ${state.store.openingHours}.`,
+      error:
+        availability.closedReason ||
+        `A loja está fechada no momento. Horário: ${state.store.openingHours}.`,
     };
   }
 
@@ -310,7 +314,7 @@ function buildStoreContextPrompt(
     ``,
     `Dados atuais da loja:`,
     `- Nome: ${state.store.name}`,
-    `- Status agora: ${state.store.isOpen ? 'ABERTA recebendo pedidos' : 'FECHADA no momento'}`,
+    `- Status agora: ${getStoreAvailability(state.store).isOpen ? 'ABERTA recebendo pedidos' : `FECHADA no momento (${getStoreAvailability(state.store).closedReason})`}`,
     `- Horário: ${state.store.openingHours}`,
     `- Endereço para retirada: ${state.store.address}, ${state.store.neighborhood}`,
     `- Taxa de entrega: ${formatCurrencyBRL(state.store.deliveryFee)} (grátis acima de ${formatCurrencyBRL(state.store.freeDeliveryMin)})`,
@@ -484,7 +488,8 @@ function generateLocalBrendiFallback(params: {
   }
 
   // 2. Closed store handling
-  if (!state.store.isOpen) {
+  const availability = getStoreAvailability(state.store);
+  if (!availability.isOpen) {
     return {
       reply: `Oi, ${firstName}! Aqui é a ${assistantName}, da ${state.store.name}. No momento estamos fechados (funcionamos ${state.store.openingHours}). Assim que abrirmos, te atendo por aqui!`,
     };

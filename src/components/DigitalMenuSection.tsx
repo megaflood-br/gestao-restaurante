@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Clock,
   MapPin,
@@ -15,6 +15,7 @@ import {
   ORDER_STATUS_META,
   PAYMENT_METHOD_LABEL,
 } from '@/lib/formatters';
+import { getStoreAvailability } from '@/lib/store-hours';
 import { ProductCustomizeModal } from '@/components/ProductCustomizeModal';
 import { CartCheckoutDrawer, type OrderCreatedSideEffects } from '@/components/CartCheckoutDrawer';
 import type {
@@ -44,6 +45,17 @@ export function DigitalMenuSection({
   const [trackedOrder, setTrackedOrder] = useState<Order | null>(null);
   const [trackError, setTrackError] = useState('');
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowTick(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const availability = useMemo(
+    () => getStoreAvailability(state.store, new Date(nowTick)),
+    [state.store, nowTick],
+  );
 
   const activeCategories = useMemo(
     () =>
@@ -145,11 +157,13 @@ export function DigitalMenuSection({
               )}
               <div className="space-y-1.5 min-w-0">
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-200">
-                  <span className="inline-flex items-center gap-1.5 font-medium">
+                  <span
+                    className={`inline-flex items-center gap-1.5 font-semibold ${
+                      availability.isOpen ? 'text-emerald-300' : 'text-rose-300'
+                    }`}
+                  >
                     <Store className="w-3.5 h-3.5" aria-hidden="true" />
-                    <span>
-                      {state.store.isOpen ? 'Aberto agora' : 'Loja fechada'}
-                    </span>
+                    <span>{availability.statusLabel}</span>
                   </span>
                   <span aria-hidden="true">·</span>
                   <span>{state.store.openingHours}</span>
@@ -195,9 +209,9 @@ export function DigitalMenuSection({
         </div>
       </section>
 
-      {!state.store.isOpen && (
+      {!availability.isOpen && (
         <div className="p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-xl text-xs sm:text-sm text-red-800 dark:text-red-300 font-medium">
-          A loja está fechada no momento. Você pode navegar pelo cardápio, mas novos pedidos estão pausados até a reabertura.
+          {availability.closedReason} Você pode navegar pelo cardápio, mas novos pedidos estão pausados até a reabertura.
         </div>
       )}
 

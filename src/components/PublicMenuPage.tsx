@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Moon, Sun } from 'lucide-react';
 import { INITIAL_DELIVERY_STATE } from '@/lib/delivery-seed';
 import { applyOrderStockDeduction } from '@/lib/stock-engine';
+import { getStoreAvailability } from '@/lib/store-hours';
 import { DigitalMenuSection } from '@/components/DigitalMenuSection';
 import type { OrderCreatedSideEffects } from '@/components/CartCheckoutDrawer';
 import type { DeliveryStoreState, Order } from '@/types/delivery';
@@ -13,6 +14,12 @@ const STORAGE_KEY = 'casa-tempero-delivery-v1';
 export function PublicMenuPage() {
   const [state, setState] = useState<DeliveryStoreState>(INITIAL_DELIVERY_STATE);
   const [isDark, setIsDark] = useState(false);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowTick(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     setIsDark(document.documentElement.classList.contains('dark'));
@@ -158,15 +165,23 @@ export function PublicMenuPage() {
           <span className="text-sm font-bold text-slate-900 dark:text-white truncate">
             {state.store.name}
           </span>
-          <span
-            className={`hidden sm:inline text-xs font-semibold whitespace-nowrap ${
-              state.store.isOpen
-                ? 'text-emerald-700 dark:text-emerald-400'
-                : 'text-red-700 dark:text-red-400'
-            }`}
-          >
-            · {state.store.isOpen ? 'Aberto agora' : 'Fechado'}
-          </span>
+          {(() => {
+            const availability = getStoreAvailability(
+              state.store,
+              new Date(nowTick),
+            );
+            return (
+              <span
+                className={`hidden sm:inline text-xs font-semibold whitespace-nowrap ${
+                  availability.isOpen
+                    ? 'text-emerald-700 dark:text-emerald-400'
+                    : 'text-red-700 dark:text-red-400'
+                }`}
+              >
+                · {availability.statusLabel}
+              </span>
+            );
+          })()}
         </div>
 
         <button

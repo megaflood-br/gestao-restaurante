@@ -21,6 +21,7 @@ import {
   PAYMENT_METHOD_LABEL,
 } from '@/lib/formatters';
 import { calculateDeliveryQuote } from '@/lib/delivery-pricing';
+import { getStoreAvailability } from '@/lib/store-hours';
 import type {
   Coupon,
   DeliveryMode,
@@ -136,6 +137,9 @@ export function CartCheckoutDrawer({
       ? Number((Number(changeFor) - total).toFixed(2))
       : 0;
 
+  const availability = getStoreAvailability(store);
+  const isStoreOpen = availability.isOpen;
+
   if (!open) return null;
 
   const handleCalculateDistanceFee = async () => {
@@ -206,8 +210,10 @@ export function CartCheckoutDrawer({
     e.preventDefault();
     setSubmitError('');
 
-    if (!store.isOpen) {
-      setSubmitError('A loja está fechada no momento.');
+    if (!isStoreOpen) {
+      setSubmitError(
+        availability.closedReason || 'A loja está fechada no momento.',
+      );
       return;
     }
 
@@ -492,11 +498,13 @@ export function CartCheckoutDrawer({
 
                 <button
                   type="button"
-                  disabled={!store.isOpen}
+                  disabled={!isStoreOpen}
                   onClick={() => setStep('checkout')}
                   className="w-full py-2.5 px-4 text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg disabled:opacity-50"
                 >
-                  {store.isOpen ? 'Continuar para Pagamento' : 'Loja Fechada no Momento'}
+                  {isStoreOpen
+                    ? 'Continuar para Pagamento'
+                    : `Loja Fechada (${store.openingHours})`}
                 </button>
               </div>
             )}

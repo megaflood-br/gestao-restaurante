@@ -87,12 +87,25 @@ export interface NeighborhoodFeeRule {
   estimatedMinutes?: number;
 }
 
+export interface StoreHourShift {
+  open: string;
+  close: string;
+}
+
+export interface StoreWeeklySchedule {
+  days: number[];
+  shifts: StoreHourShift[];
+}
+
 export interface StoreSettings {
   name: string;
   segment: string;
   description: string;
   isOpen: boolean;
   openingHours: string;
+  openingSchedule?: StoreWeeklySchedule;
+  autoScheduleEnabled?: boolean;
+  timezone?: string;
   phone: string;
   address: string;
   neighborhood: string;
