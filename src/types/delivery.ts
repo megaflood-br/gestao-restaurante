@@ -2,6 +2,8 @@ export type DeliveryModuleId =
   | 'pedidos'
   | 'atendimento'
   | 'entregadores'
+  | 'checklists'
+  | 'desperdicios'
   | 'cardapio'
   | 'promocoes'
   | 'estoque'
@@ -164,7 +166,12 @@ export interface TechnicalSheetIngredient {
   unit: StockUnit;
 }
 
-export type StockMovementType = 'entrada' | 'saida_pedido' | 'ajuste' | 'estorno';
+export type StockMovementType =
+  | 'entrada'
+  | 'saida_pedido'
+  | 'ajuste'
+  | 'estorno'
+  | 'desperdicio';
 
 export interface StockMovement {
   id: string;
@@ -352,6 +359,100 @@ export interface RecurringExpense {
   lastLaunchedMonth?: string;
 }
 
+export type ChecklistRole =
+  | 'cozinha'
+  | 'atendimento'
+  | 'limpeza'
+  | 'gerencia'
+  | 'entregadores';
+
+export type ChecklistShift =
+  | 'abertura'
+  | 'almoco'
+  | 'jantar'
+  | 'fechamento'
+  | 'geral';
+
+export type ChecklistFrequency = 'diario' | 'turno' | 'semanal';
+
+export interface ChecklistItemTemplate {
+  id: string;
+  title: string;
+  instruction?: string;
+  critical?: boolean;
+}
+
+export interface ChecklistTemplate {
+  id: string;
+  title: string;
+  description?: string;
+  role: ChecklistRole;
+  shift: ChecklistShift;
+  frequency: ChecklistFrequency;
+  active: boolean;
+  items: ChecklistItemTemplate[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChecklistRunItemStatus {
+  itemId: string;
+  title: string;
+  instruction?: string;
+  critical?: boolean;
+  checked: boolean;
+  checkedAt?: string;
+  note?: string;
+}
+
+export interface ChecklistRun {
+  id: string;
+  templateId: string;
+  templateTitle: string;
+  role: ChecklistRole;
+  shift: ChecklistShift;
+  employeeName: string;
+  status: 'em_andamento' | 'concluido';
+  startedAt: string;
+  completedAt?: string;
+  items: ChecklistRunItemStatus[];
+  notes?: string;
+}
+
+export type WasteTargetType = 'insumo' | 'prato';
+
+export type WasteReason =
+  | 'vencimento'
+  | 'erro_preparo'
+  | 'sobra_buffet'
+  | 'avaria_embalagem'
+  | 'qualidade'
+  | 'outros';
+
+export interface WasteAffectedIngredient {
+  ingredientId: string;
+  ingredientName: string;
+  quantity: number;
+  unit: StockUnit;
+  estimatedCost: number;
+}
+
+export interface WasteLog {
+  id: string;
+  targetType: WasteTargetType;
+  targetId: string;
+  targetName: string;
+  quantity: number;
+  unitLabel: string;
+  reason: WasteReason;
+  employeeName: string;
+  notes?: string;
+  estimatedCost: number;
+  stockDeducted: boolean;
+  affectedIngredients: WasteAffectedIngredient[];
+  createdAt: string;
+}
+
 export interface DeliveryStoreState {
   store: StoreSettings;
   categories: MenuCategory[];
@@ -365,4 +466,7 @@ export interface DeliveryStoreState {
   financialEntries: FinancialEntry[];
   recurringExpenses: RecurringExpense[];
   courierSettlements: CourierSettlement[];
+  checklistTemplates: ChecklistTemplate[];
+  checklistRuns: ChecklistRun[];
+  wasteLogs: WasteLog[];
 }

@@ -1,8 +1,12 @@
 import type {
+  ChecklistFrequency,
+  ChecklistRole,
+  ChecklistShift,
   CourierStatus,
   OrderSource,
   OrderStatus,
   PaymentMethod,
+  WasteReason,
 } from '@/types/delivery';
 
 export function formatCurrencyBRL(value: number): string {
@@ -90,4 +94,35 @@ export const COURIER_STATUS_LABEL: Record<CourierStatus, string> = {
   disponivel: 'Disponível',
   em_rota: 'Em Rota',
   offline: 'Offline',
+};
+
+export const CHECKLIST_ROLE_LABEL: Record<ChecklistRole, string> = {
+  cozinha: 'Cozinha',
+  atendimento: 'Atendimento / Balcão',
+  limpeza: 'Higienização / Limpeza',
+  gerencia: 'Gerência / Caixa',
+  entregadores: 'Despacho / Entregadores',
+};
+
+export const CHECKLIST_SHIFT_LABEL: Record<ChecklistShift, string> = {
+  abertura: 'Abertura',
+  almoco: 'Turno Almoço',
+  jantar: 'Turno Jantar',
+  fechamento: 'Fechamento',
+  geral: 'Qualquer Turno',
+};
+
+export const CHECKLIST_FREQUENCY_LABEL: Record<ChecklistFrequency, string> = {
+  diario: 'Diário',
+  turno: 'Por Turno',
+  semanal: 'Semanal',
+};
+
+export const WASTE_REASON_LABEL: Record<WasteReason, string> = {
+  vencimento: 'Validade vencida / Deterioração',
+  erro_preparo: 'Erro no preparo / Queima',
+  sobra_buffet: 'Sobra não aproveitável / Fim de turno',
+  avaria_embalagem: 'Queda / Avaria na embalagem',
+  qualidade: 'Fora do padrão de qualidade',
+  outros: 'Outros motivos',
 };

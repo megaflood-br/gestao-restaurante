@@ -944,7 +944,8 @@ export function StockTechnicalSheetSection({
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
                 {state.stockMovements.map((mov) => {
-                  const isOutbound = mov.type === 'saida_pedido';
+                  const isOutbound =
+                    mov.type === 'saida_pedido' || mov.type === 'desperdicio';
                   return (
                     <tr
                       key={mov.id}
@@ -959,13 +960,15 @@ export function StockTechnicalSheetSection({
                       <td className="py-3 px-4 whitespace-nowrap">
                         <span
                           className={`inline-flex items-center gap-1 font-semibold ${
-                            isOutbound
-                              ? 'text-red-700 dark:text-red-400'
-                              : mov.type === 'estorno'
-                                ? 'text-brand-600 dark:text-brand-400'
-                                : mov.type === 'entrada'
-                                  ? 'text-emerald-700 dark:text-emerald-400'
-                                  : 'text-slate-600 dark:text-slate-300'
+                            mov.type === 'desperdicio'
+                              ? 'text-amber-700 dark:text-amber-400'
+                              : isOutbound
+                                ? 'text-red-700 dark:text-red-400'
+                                : mov.type === 'estorno'
+                                  ? 'text-brand-600 dark:text-brand-400'
+                                  : mov.type === 'entrada'
+                                    ? 'text-emerald-700 dark:text-emerald-400'
+                                    : 'text-slate-600 dark:text-slate-300'
                           }`}
                         >
                           {isOutbound ? (
@@ -976,11 +979,13 @@ export function StockTechnicalSheetSection({
                           <span>
                             {mov.type === 'saida_pedido'
                               ? 'Baixa Pedido'
-                              : mov.type === 'entrada'
-                                ? 'Entrada'
-                                : mov.type === 'estorno'
-                                  ? 'Estorno'
-                                  : 'Ajuste'}
+                              : mov.type === 'desperdicio'
+                                ? 'Desperdício'
+                                : mov.type === 'entrada'
+                                  ? 'Entrada'
+                                  : mov.type === 'estorno'
+                                    ? 'Estorno'
+                                    : 'Ajuste'}
                           </span>
                         </span>
                       </td>

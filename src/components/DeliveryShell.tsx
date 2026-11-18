@@ -9,6 +9,7 @@ import {
   Copy,
   ExternalLink,
   Image as ImageIcon,
+  ListChecks,
   Menu,
   MessageSquare,
   Moon,
@@ -16,6 +17,7 @@ import {
   Settings,
   Sun,
   Tags,
+  Trash2,
   UtensilsCrossed,
   Wallet,
   X,
@@ -23,6 +25,7 @@ import {
 import { INITIAL_DELIVERY_STATE } from '@/lib/delivery-seed';
 import {
   applyOrderStockDeduction,
+  applyWasteStockDeduction,
   reverseOrderStockDeduction,
 } from '@/lib/stock-engine';
 import { getCurrentMonthKey } from '@/lib/finance-engine';
@@ -34,12 +37,19 @@ import { CatalogCouponsSection } from '@/components/CatalogCouponsSection';
 import { StockTechnicalSheetSection } from '@/components/StockTechnicalSheetSection';
 import { CouriersReportsSection } from '@/components/CouriersReportsSection';
 import { CostsFinanceSection } from '@/components/CostsFinanceSection';
+import { ChecklistsSection } from '@/components/ChecklistsSection';
+import {
+  WasteControlSection,
+  type RegisterWastePayload,
+} from '@/components/WasteControlSection';
 import {
   SettingsSection,
   type SettingsTabId,
 } from '@/components/SettingsSection';
 import type { OrderCreatedSideEffects } from '@/components/CartCheckoutDrawer';
 import type {
+  ChecklistRun,
+  ChecklistTemplate,
   Coupon,
   Courier,
   CourierSettlement,
@@ -77,6 +87,8 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'pedidos', label: 'Pedidos', icon: ClipboardList },
       { id: 'atendimento', label: 'Atendimento IA', icon: MessageSquare },
       { id: 'entregadores', label: 'Entregadores', icon: Bike },
+      { id: 'checklists', label: 'Checklists Equipe', icon: ListChecks },
+      { id: 'desperdicios', label: 'Desperdícios', icon: Trash2 },
     ],
   },
   {
@@ -175,6 +187,17 @@ export function DeliveryShell() {
               courierSettlements: Array.isArray(parsed.courierSettlements)
                 ? parsed.courierSettlements
                 : INITIAL_DELIVERY_STATE.courierSettlements,
+              checklistTemplates:
+                Array.isArray(parsed.checklistTemplates) &&
+                parsed.checklistTemplates.length > 0
+                  ? parsed.checklistTemplates
+                  : INITIAL_DELIVERY_STATE.checklistTemplates,
+              checklistRuns: Array.isArray(parsed.checklistRuns)
+                ? parsed.checklistRuns
+                : INITIAL_DELIVERY_STATE.checklistRuns,
+              wasteLogs: Array.isArray(parsed.wasteLogs)
+                ? parsed.wasteLogs
+                : INITIAL_DELIVERY_STATE.wasteLogs,
             });
             return;
           }
@@ -195,7 +218,21 @@ export function DeliveryShell() {
       try {
         const parsed = JSON.parse(event.newValue) as DeliveryStoreState;
         if (parsed.store && parsed.orders) {
-          setState(parsed);
+          setState({
+            ...INITIAL_DELIVERY_STATE,
+            ...parsed,
+            checklistTemplates:
+              Array.isArray(parsed.checklistTemplates) &&
+              parsed.checklistTemplates.length > 0
+                ? parsed.checklistTemplates
+                : INITIAL_DELIVERY_STATE.checklistTemplates,
+            checklistRuns: Array.isArray(parsed.checklistRuns)
+              ? parsed.checklistRuns
+              : INITIAL_DELIVERY_STATE.checklistRuns,
+            wasteLogs: Array.isArray(parsed.wasteLogs)
+              ? parsed.wasteLogs
+              : INITIAL_DELIVERY_STATE.wasteLogs,
+          });
         }
       } catch {
         // Ignore invalid storage payload
@@ -756,6 +793,107 @@ export function DeliveryShell() {
     }).catch(() => {});
   };
 
+  const handleSaveChecklistTemplate = async (template: ChecklistTemplate) => {
+    persistState((prev) => {
+      const list = prev.checklistTemplates ?? [];
+      const exists = list.some((t) => t.id === template.id);
+      return {
+        ...prev,
+        checklistTemplates: exists
+          ? list.map((t) => (t.id === template.id ? template : t))
+          : [template, ...list],
+      };
+    });
+
+    await fetch('/api/checklists', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create_template', template }),
+    }).catch(() => {});
+  };
+
+  const handleToggleChecklistActive = async (templateId: string) => {
+    const target = (state.checklistTemplates ?? []).find(
+      (t) => t.id === templateId,
+    );
+    const nextActive = target ? !target.active : true;
+    persistState((prev) => ({
+      ...prev,
+      checklistTemplates: (prev.checklistTemplates ?? []).map((t) =>
+        t.id === templateId
+          ? { ...t, active: !t.active, updatedAt: new Date().toISOString() }
+          : t,
+      ),
+    }));
+
+    await fetch('/api/checklists', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'update_template',
+        templateId,
+        updates: { active: nextActive },
+      }),
+    }).catch(() => {});
+  };
+
+  const handleDeleteChecklistTemplate = async (templateId: string) => {
+    persistState((prev) => ({
+      ...prev,
+      checklistTemplates: (prev.checklistTemplates ?? []).filter(
+        (t) => t.id !== templateId,
+      ),
+    }));
+
+    await fetch(`/api/checklists?templateId=${encodeURIComponent(templateId)}`, {
+      method: 'DELETE',
+    }).catch(() => {});
+  };
+
+  const handleSubmitChecklistRun = async (run: ChecklistRun) => {
+    persistState((prev) => {
+      const list = prev.checklistRuns ?? [];
+      const exists = list.some((r) => r.id === run.id);
+      return {
+        ...prev,
+        checklistRuns: exists
+          ? list.map((r) => (r.id === run.id ? run : r))
+          : [run, ...list],
+      };
+    });
+
+    await fetch('/api/checklists', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'submit_run', run }),
+    }).catch(() => {});
+  };
+
+  const handleRegisterWaste = async (payload: RegisterWastePayload) => {
+    persistState((prev) => {
+      const result = applyWasteStockDeduction({
+        ...payload,
+        menuItems: prev.menuItems,
+        ingredients: prev.ingredients,
+      });
+      return {
+        ...prev,
+        ingredients: result.ingredients,
+        stockMovements:
+          result.newMovements.length > 0
+            ? [...result.newMovements, ...prev.stockMovements]
+            : prev.stockMovements,
+        wasteLogs: [result.wasteLog, ...(prev.wasteLogs ?? [])],
+      };
+    });
+
+    await fetch('/api/waste', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+  };
+
   const pendingOrdersCount = state.orders.filter(
     (o) => o.status === 'pendente',
   ).length;
@@ -1007,6 +1145,20 @@ export function DeliveryShell() {
               onUpdateSettlement={handleUpdateCourierSettlement}
               onAddFinancialEntry={handleAddFinancialEntry}
               onAppendWhatsappLogs={handleAppendWhatsappLogs}
+            />
+          ) : activeModule === 'checklists' ? (
+            <ChecklistsSection
+              state={state}
+              onSaveTemplate={handleSaveChecklistTemplate}
+              onToggleTemplateActive={handleToggleChecklistActive}
+              onDeleteTemplate={handleDeleteChecklistTemplate}
+              onSubmitRun={handleSubmitChecklistRun}
+            />
+          ) : activeModule === 'desperdicios' ? (
+            <WasteControlSection
+              state={state}
+              onRegisterWaste={handleRegisterWaste}
+              onOpenStock={() => setActiveModule('estoque')}
             />
           ) : activeModule === 'cardapio' ? (
             <CatalogCouponsSection
