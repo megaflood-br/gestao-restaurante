@@ -97,6 +97,9 @@ export function ChecklistsSection({
   const [formShift, setFormShift] = useState<ChecklistShift>('abertura');
   const [formFrequency, setFormFrequency] =
     useState<ChecklistFrequency>('diario');
+  const [formAssignedEmployeeIds, setFormAssignedEmployeeIds] = useState<
+    string[]
+  >([]);
   const [formSteps, setFormSteps] = useState<ChecklistItemTemplate[]>([
     EMPTY_STEP(),
   ]);
@@ -104,7 +107,12 @@ export function ChecklistsSection({
 
   // Embedded execution state
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
-  const [employeeName, setEmployeeName] = useState('Dona Maria (Cozinheira)');
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>(
+    () => state.employees?.[0]?.id ?? 'outro',
+  );
+  const [employeeName, setEmployeeName] = useState(
+    () => state.employees?.[0]?.name ?? 'Dona Maria Silva',
+  );
   const [activeRun, setActiveRun] = useState<ChecklistRun | null>(null);
   const [runFeedback, setRunFeedback] = useState<string | null>(null);
 
@@ -200,6 +208,7 @@ export function ChecklistsSection({
     setFormRole('cozinha');
     setFormShift('abertura');
     setFormFrequency('diario');
+    setFormAssignedEmployeeIds([]);
     setFormSteps([EMPTY_STEP(), EMPTY_STEP()]);
     setFormError(null);
     setEditorOpen(true);
@@ -212,6 +221,7 @@ export function ChecklistsSection({
     setFormRole(tpl.role);
     setFormShift(tpl.shift);
     setFormFrequency(tpl.frequency);
+    setFormAssignedEmployeeIds(tpl.assignedEmployeeIds ?? []);
     setFormSteps(
       tpl.items.length > 0
         ? tpl.items.map((item) => ({ ...item }))
@@ -263,6 +273,10 @@ export function ChecklistsSection({
       shift: formShift,
       frequency: formFrequency,
       active: existing ? existing.active : true,
+      assignedEmployeeIds:
+        formAssignedEmployeeIds.length > 0
+          ? formAssignedEmployeeIds
+          : undefined,
       items: validSteps,
       createdAt: existing?.createdAt ?? nowIso,
       updatedAt: nowIso,
@@ -273,7 +287,11 @@ export function ChecklistsSection({
   };
 
   const startExecutionForTemplate = (tpl: ChecklistTemplate) => {
-    const cleanEmployee = employeeName.trim() || 'Funcionário';
+    const matchedEmployee = (state.employees ?? []).find(
+      (e) => e.id === selectedEmployeeId,
+    );
+    const cleanEmployee =
+      matchedEmployee?.name ?? (employeeName.trim() || 'Funcionário');
     const nowIso = new Date().toISOString();
     const newRun: ChecklistRun = {
       id: `run-${Date.now()}`,
@@ -281,6 +299,7 @@ export function ChecklistsSection({
       templateTitle: tpl.title,
       role: tpl.role,
       shift: tpl.shift,
+      employeeId: matchedEmployee?.id,
       employeeName: cleanEmployee,
       status: 'em_andamento',
       startedAt: nowIso,
@@ -610,6 +629,21 @@ export function ChecklistsSection({
                         </p>
                       )}
 
+                      {(tpl.assignedEmployeeIds ?? []).length > 0 && (
+                        <p className="text-[11px] font-medium text-brand-700 dark:text-brand-400">
+                          Vinculado a:{' '}
+                          {(tpl.assignedEmployeeIds ?? [])
+                            .map(
+                              (empId) =>
+                                (state.employees ?? []).find(
+                                  (e) => e.id === empId,
+                                )?.name,
+                            )
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </p>
+                      )}
+
                       <ol className="space-y-1.5 pt-1 border-t border-slate-100 dark:border-slate-800">
                         {tpl.items.slice(0, 4).map((step, idx) => (
                           <li
@@ -708,17 +742,41 @@ export function ChecklistsSection({
               Iniciar Checklist no Painel
             </h2>
 
-            <div>
-              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+            <div className="space-y-2">
+              <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
                 Funcionário Responsável
               </label>
-              <input
-                type="text"
-                value={employeeName}
-                onChange={(e) => setEmployeeName(e.target.value)}
-                placeholder="Nome do funcionário"
+              <select
+                value={selectedEmployeeId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedEmployeeId(val);
+                  const found = (state.employees ?? []).find(
+                    (emp) => emp.id === val,
+                  );
+                  if (found) setEmployeeName(found.name);
+                }}
+                aria-label="Selecionar funcionário responsável"
                 className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-              />
+              >
+                {(state.employees ?? [])
+                  .filter((emp) => emp.status !== 'inativo')
+                  .map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name} ({CHECKLIST_ROLE_LABEL[emp.role]})
+                    </option>
+                  ))}
+                <option value="outro">Outro colaborador (digitar nome)</option>
+              </select>
+              {selectedEmployeeId === 'outro' && (
+                <input
+                  type="text"
+                  value={employeeName}
+                  onChange={(e) => setEmployeeName(e.target.value)}
+                  placeholder="Nome do funcionário"
+                  className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                />
+              )}
             </div>
 
             <div className="space-y-2">
@@ -1176,6 +1234,55 @@ export function ChecklistsSection({
                   </select>
                 </div>
               </div>
+
+              {(state.employees ?? []).length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <p className="text-xs font-bold text-slate-900 dark:text-white">
+                    Funcionários Vinculados (opcional)
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Vincule colaboradores específicos para aparecer em destaque no portal /equipe.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {(state.employees ?? [])
+                      .filter((emp) => emp.status !== 'inativo')
+                      .map((emp) => {
+                        const checked = formAssignedEmployeeIds.includes(
+                          emp.id,
+                        );
+                        return (
+                          <label
+                            key={emp.id}
+                            className={`flex items-center gap-2 p-2.5 rounded-lg border text-xs cursor-pointer transition-colors ${
+                              checked
+                                ? 'bg-brand-50/70 dark:bg-brand-950/30 border-brand-300 dark:border-brand-700 text-slate-900 dark:text-white'
+                                : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() =>
+                                setFormAssignedEmployeeIds((prev) =>
+                                  prev.includes(emp.id)
+                                    ? prev.filter((id) => id !== emp.id)
+                                    : [...prev, emp.id],
+                                )
+                              }
+                              className="rounded border-slate-300 text-brand-600"
+                            />
+                            <span className="truncate font-medium">
+                              {emp.name}
+                            </span>
+                            <span className="text-[11px] text-slate-400 ml-auto shrink-0">
+                              {CHECKLIST_ROLE_LABEL[emp.role]}
+                            </span>
+                          </label>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
                 <div className="flex items-center justify-between">

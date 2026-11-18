@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import {
   BarChart3,
   Bike,
+  Briefcase,
   Check,
   ClipboardList,
   Copy,
@@ -46,6 +47,10 @@ import {
   type RegisterWastePayload,
 } from '@/components/WasteControlSection';
 import {
+  FuncionariosSection,
+  type AddEmployeeLedgerPayload,
+} from '@/components/FuncionariosSection';
+import {
   SettingsSection,
   type SettingsTabId,
 } from '@/components/SettingsSection';
@@ -59,6 +64,8 @@ import type {
   CrmCustomer,
   DeliveryModuleId,
   DeliveryStoreState,
+  Employee,
+  EmployeeLedgerEntry,
   EvolutionConfig,
   FinancialEntry,
   LoyaltyProgramConfig,
@@ -70,6 +77,8 @@ import type {
   Order,
   OrderStatus,
   RecurringExpense,
+  StaffTask,
+  StaffTaskStatus,
   StockIngredient,
   StockMovement,
   StoreSettings,
@@ -96,6 +105,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'atendimento', label: 'Atendimento IA', icon: MessageSquare },
       { id: 'clientes', label: 'CRM & Fidelidade', icon: Users },
       { id: 'entregadores', label: 'Entregadores', icon: Bike },
+      { id: 'funcionarios', label: 'Funcionários', icon: Briefcase },
       { id: 'checklists', label: 'Checklists Equipe', icon: ListChecks },
       { id: 'desperdicios', label: 'Desperdícios', icon: Trash2 },
     ],
@@ -228,6 +238,15 @@ export function DeliveryShell() {
               loyaltyTransactions: Array.isArray(parsed.loyaltyTransactions)
                 ? parsed.loyaltyTransactions
                 : INITIAL_DELIVERY_STATE.loyaltyTransactions,
+              employees: Array.isArray(parsed.employees)
+                ? parsed.employees
+                : INITIAL_DELIVERY_STATE.employees,
+              staffTasks: Array.isArray(parsed.staffTasks)
+                ? parsed.staffTasks
+                : INITIAL_DELIVERY_STATE.staffTasks,
+              employeeLedger: Array.isArray(parsed.employeeLedger)
+                ? parsed.employeeLedger
+                : INITIAL_DELIVERY_STATE.employeeLedger,
             });
             return;
           }
@@ -281,6 +300,15 @@ export function DeliveryShell() {
             loyaltyTransactions: Array.isArray(parsed.loyaltyTransactions)
               ? parsed.loyaltyTransactions
               : INITIAL_DELIVERY_STATE.loyaltyTransactions,
+            employees: Array.isArray(parsed.employees)
+              ? parsed.employees
+              : INITIAL_DELIVERY_STATE.employees,
+            staffTasks: Array.isArray(parsed.staffTasks)
+              ? parsed.staffTasks
+              : INITIAL_DELIVERY_STATE.staffTasks,
+            employeeLedger: Array.isArray(parsed.employeeLedger)
+              ? parsed.employeeLedger
+              : INITIAL_DELIVERY_STATE.employeeLedger,
           });
         }
       } catch {
@@ -1209,6 +1237,257 @@ export function DeliveryShell() {
     setActiveModule('pedidos');
   };
 
+  const handleUpsertEmployee = async (employee: Employee) => {
+    persistState((prev) => {
+      const list = prev.employees ?? [];
+      const exists = list.some((e) => e.id === employee.id);
+      return {
+        ...prev,
+        employees: exists
+          ? list.map((e) => (e.id === employee.id ? employee : e))
+          : [employee, ...list],
+        staffTasks: (prev.staffTasks ?? []).map((t) =>
+          t.employeeId === employee.id
+            ? { ...t, employeeName: employee.name }
+            : t,
+        ),
+      };
+    });
+    await fetch('/api/staff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'upsert_employee', employee }),
+    }).catch(() => {});
+  };
+
+  const handleDeleteEmployee = async (employeeId: string) => {
+    persistState((prev) => ({
+      ...prev,
+      employees: (prev.employees ?? []).filter((e) => e.id !== employeeId),
+      staffTasks: (prev.staffTasks ?? []).filter(
+        (t) => t.employeeId !== employeeId,
+      ),
+      checklistTemplates: (prev.checklistTemplates ?? []).map((tpl) => ({
+        ...tpl,
+        assignedEmployeeIds: (tpl.assignedEmployeeIds ?? []).filter(
+          (id) => id !== employeeId,
+        ),
+      })),
+    }));
+    await fetch(
+      `/api/staff?entity=employee&id=${encodeURIComponent(employeeId)}`,
+      { method: 'DELETE' },
+    ).catch(() => {});
+  };
+
+  const handleUpsertStaffTask = async (task: StaffTask) => {
+    persistState((prev) => {
+      const list = prev.staffTasks ?? [];
+      const exists = list.some((t) => t.id === task.id);
+      return {
+        ...prev,
+        staffTasks: exists
+          ? list.map((t) => (t.id === task.id ? task : t))
+          : [task, ...list],
+      };
+    });
+    await fetch('/api/staff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'upsert_task', task }),
+    }).catch(() => {});
+  };
+
+  const handleToggleStaffTaskStatus = async (
+    taskId: string,
+    nextStatus: StaffTaskStatus,
+  ) => {
+    const nowIso = new Date().toISOString();
+    persistState((prev) => ({
+      ...prev,
+      staffTasks: (prev.staffTasks ?? []).map((t) =>
+        t.id === taskId
+          ? {
+              ...t,
+              status: nextStatus,
+              completedAt: nextStatus === 'concluida' ? nowIso : undefined,
+            }
+          : t,
+      ),
+    }));
+    await fetch('/api/staff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'toggle_task_status',
+        taskId,
+        nextStatus,
+      }),
+    }).catch(() => {});
+  };
+
+  const handleDeleteStaffTask = async (taskId: string) => {
+    persistState((prev) => ({
+      ...prev,
+      staffTasks: (prev.staffTasks ?? []).filter((t) => t.id !== taskId),
+    }));
+    await fetch(`/api/staff?entity=task&id=${encodeURIComponent(taskId)}`, {
+      method: 'DELETE',
+    }).catch(() => {});
+  };
+
+  const handleToggleChecklistLink = async (
+    employeeId: string,
+    templateId: string,
+  ) => {
+    const nowIso = new Date().toISOString();
+    persistState((prev) => ({
+      ...prev,
+      checklistTemplates: (prev.checklistTemplates ?? []).map((tpl) => {
+        if (tpl.id !== templateId) return tpl;
+        const current = tpl.assignedEmployeeIds ?? [];
+        const nextIds = current.includes(employeeId)
+          ? current.filter((id) => id !== employeeId)
+          : [...current, employeeId];
+        return {
+          ...tpl,
+          assignedEmployeeIds: nextIds,
+          updatedAt: nowIso,
+        };
+      }),
+    }));
+    await fetch('/api/staff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'toggle_checklist_link',
+        employeeId,
+        templateId,
+      }),
+    }).catch(() => {});
+  };
+
+  const handleSendEmployeeReceiptWhatsapp = async (
+    entryId: string,
+    customMessage?: string,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const res = await fetch('/api/staff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'send_receipt_whatsapp',
+          entryId,
+          customMessage,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        log?: WhatsappLog;
+        error?: string;
+      };
+      if (data.ok && data.log) {
+        persistState((prev) => ({
+          ...prev,
+          employeeLedger: (prev.employeeLedger ?? []).map((e) =>
+            e.id === entryId ? { ...e, whatsappSent: true } : e,
+          ),
+          whatsappLogs: [data.log!, ...prev.whatsappLogs],
+        }));
+        return { ok: true };
+      }
+      return { ok: false, error: data.error || 'Falha ao enviar WhatsApp.' };
+    } catch {
+      return { ok: false, error: 'Erro de comunicação com o servidor.' };
+    }
+  };
+
+  const handleAddEmployeeLedgerEntry = async (
+    payload: AddEmployeeLedgerPayload,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    const { entry, markSettledIds, launchToFinance, sendWhatsapp } = payload;
+    let syncedFinancial: FinancialEntry | null = null;
+    if (launchToFinance && entry.amount > 0) {
+      const labelPrefix =
+        entry.type === 'vale'
+          ? 'Vale funcionário'
+          : entry.type === 'pagamento'
+            ? 'Pagamento salário'
+            : entry.type === 'bonus'
+              ? 'Bônus equipe'
+              : 'Despesa funcionário';
+      syncedFinancial = {
+        id: `fin-emp-${Date.now()}`,
+        type: 'custo',
+        category: 'equipe_entregas',
+        description: `${labelPrefix} · ${entry.employeeName} — ${entry.description}`,
+        amount: entry.amount,
+        date: entry.date,
+        paymentMethod: entry.paymentMethod || 'Pix',
+        notes: `Lançado via módulo Funcionários (${entry.id})`,
+        createdAt: entry.createdAt,
+      };
+    }
+
+    const storedEntry: EmployeeLedgerEntry = syncedFinancial
+      ? { ...entry, financialEntryId: syncedFinancial.id }
+      : entry;
+
+    persistState((prev) => {
+      const settleSet = new Set(markSettledIds ?? []);
+      const updatedLedger = (prev.employeeLedger ?? []).map((item) =>
+        settleSet.has(item.id)
+          ? { ...item, settled: true, settlementRefId: storedEntry.id }
+          : item,
+      );
+      return {
+        ...prev,
+        employeeLedger: [storedEntry, ...updatedLedger],
+        financialEntries: syncedFinancial
+          ? [syncedFinancial, ...prev.financialEntries]
+          : prev.financialEntries,
+      };
+    });
+
+    try {
+      const res = await fetch('/api/staff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'add_ledger_entry',
+          entry: storedEntry,
+          markSettledIds,
+          launchToFinance,
+        }),
+      });
+      if (!res.ok) {
+        return { ok: false, error: 'Erro ao salvar lançamento no servidor.' };
+      }
+      if (sendWhatsapp) {
+        await handleSendEmployeeReceiptWhatsapp(
+          storedEntry.id,
+          storedEntry.receiptText,
+        );
+      }
+      return { ok: true };
+    } catch {
+      return { ok: true };
+    }
+  };
+
+  const handleDeleteEmployeeLedgerEntry = async (entryId: string) => {
+    persistState((prev) => ({
+      ...prev,
+      employeeLedger: (prev.employeeLedger ?? []).filter(
+        (e) => e.id !== entryId,
+      ),
+    }));
+    await fetch(
+      `/api/staff?entity=ledger&id=${encodeURIComponent(entryId)}`,
+      { method: 'DELETE' },
+    ).catch(() => {});
+  };
+
   const pendingOrdersCount = state.orders.filter(
     (o) => o.status === 'pendente',
   ).length;
@@ -1488,6 +1767,20 @@ export function DeliveryShell() {
               onUpdateSettlement={handleUpdateCourierSettlement}
               onAddFinancialEntry={handleAddFinancialEntry}
               onAppendWhatsappLogs={handleAppendWhatsappLogs}
+            />
+          ) : activeModule === 'funcionarios' ? (
+            <FuncionariosSection
+              state={state}
+              onUpsertEmployee={handleUpsertEmployee}
+              onDeleteEmployee={handleDeleteEmployee}
+              onUpsertTask={handleUpsertStaffTask}
+              onToggleTaskStatus={handleToggleStaffTaskStatus}
+              onDeleteTask={handleDeleteStaffTask}
+              onToggleChecklistLink={handleToggleChecklistLink}
+              onAddLedgerEntry={handleAddEmployeeLedgerEntry}
+              onDeleteLedgerEntry={handleDeleteEmployeeLedgerEntry}
+              onSendReceiptWhatsapp={handleSendEmployeeReceiptWhatsapp}
+              onOpenChecklistsModule={() => setActiveModule('checklists')}
             />
           ) : activeModule === 'checklists' ? (
             <ChecklistsSection

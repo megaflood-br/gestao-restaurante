@@ -3,6 +3,7 @@ export type DeliveryModuleId =
   | 'atendimento'
   | 'entregadores'
   | 'clientes'
+  | 'funcionarios'
   | 'checklists'
   | 'desperdicios'
   | 'cardapio'
@@ -396,6 +397,7 @@ export interface ChecklistTemplate {
   shift: ChecklistShift;
   frequency: ChecklistFrequency;
   active: boolean;
+  assignedEmployeeIds?: string[];
   items: ChecklistItemTemplate[];
   createdAt: string;
   updatedAt: string;
@@ -417,6 +419,7 @@ export interface ChecklistRun {
   templateTitle: string;
   role: ChecklistRole;
   shift: ChecklistShift;
+  employeeId?: string;
   employeeName: string;
   status: 'em_andamento' | 'concluido';
   startedAt: string;
@@ -537,6 +540,68 @@ export interface LoyaltyTransaction {
   createdAt: string;
 }
 
+export type EmployeePayType = 'mensal' | 'diaria' | 'hora';
+
+export type EmployeeStatus = 'ativo' | 'ferias' | 'inativo';
+
+export interface Employee {
+  id: string;
+  name: string;
+  phone: string;
+  role: ChecklistRole;
+  defaultShift: ChecklistShift;
+  payType: EmployeePayType;
+  baseSalary: number;
+  payDay: number;
+  pixKey?: string;
+  admissionDate: string;
+  status: EmployeeStatus;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type StaffTaskPriority = 'normal' | 'alta';
+
+export type StaffTaskStatus = 'pendente' | 'em_andamento' | 'concluida';
+
+export interface StaffTask {
+  id: string;
+  title: string;
+  description?: string;
+  employeeId: string;
+  employeeName: string;
+  linkedChecklistId?: string;
+  priority: StaffTaskPriority;
+  dueLabel?: string;
+  status: StaffTaskStatus;
+  completedAt?: string;
+  createdAt: string;
+}
+
+export type EmployeeLedgerType = 'vale' | 'consumo' | 'pagamento' | 'bonus';
+
+export interface EmployeeLedgerEntry {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  type: EmployeeLedgerType;
+  amount: number;
+  date: string;
+  description: string;
+  menuItemId?: string;
+  menuItemName?: string;
+  quantity?: number;
+  deductFromPay: boolean;
+  settled: boolean;
+  settlementRefId?: string;
+  financialEntryId?: string;
+  paymentMethod?: string;
+  whatsappSent?: boolean;
+  receiptText?: string;
+  createdAt: string;
+}
+
 export interface DeliveryStoreState {
   store: StoreSettings;
   categories: MenuCategory[];
@@ -558,4 +623,7 @@ export interface DeliveryStoreState {
   loyaltyPromotions: LoyaltyPromotion[];
   loyaltyRewards: LoyaltyReward[];
   loyaltyTransactions: LoyaltyTransaction[];
+  employees: Employee[];
+  staffTasks: StaffTask[];
+  employeeLedger: EmployeeLedgerEntry[];
 }

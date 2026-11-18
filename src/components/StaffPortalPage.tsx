@@ -18,6 +18,8 @@ import {
   CHECKLIST_FREQUENCY_LABEL,
   CHECKLIST_ROLE_LABEL,
   CHECKLIST_SHIFT_LABEL,
+  TASK_PRIORITY_LABEL,
+  TASK_STATUS_LABEL,
   formatDateTimeBR,
   formatTimeBR,
 } from '@/lib/formatters';
@@ -26,10 +28,12 @@ import type {
   ChecklistRun,
   ChecklistTemplate,
   DeliveryStoreState,
+  StaffTaskStatus,
 } from '@/types/delivery';
 
 const STORAGE_KEY = 'casa-tempero-delivery-v1';
 const STAFF_NAME_KEY = 'casa-tempero-staff-name';
+const STAFF_ID_KEY = 'casa-tempero-staff-id';
 
 function hydrateState(parsed: DeliveryStoreState): DeliveryStoreState {
   return {
@@ -50,6 +54,15 @@ function hydrateState(parsed: DeliveryStoreState): DeliveryStoreState {
     wasteLogs: Array.isArray(parsed.wasteLogs)
       ? parsed.wasteLogs
       : INITIAL_DELIVERY_STATE.wasteLogs,
+    employees: Array.isArray(parsed.employees)
+      ? parsed.employees
+      : INITIAL_DELIVERY_STATE.employees,
+    staffTasks: Array.isArray(parsed.staffTasks)
+      ? parsed.staffTasks
+      : INITIAL_DELIVERY_STATE.staffTasks,
+    employeeLedger: Array.isArray(parsed.employeeLedger)
+      ? parsed.employeeLedger
+      : INITIAL_DELIVERY_STATE.employeeLedger,
   };
 }
 
@@ -64,6 +77,7 @@ const ROLE_FILTERS: Array<'todos' | ChecklistRole> = [
 
 export function StaffPortalPage() {
   const [state, setState] = useState<DeliveryStoreState>(INITIAL_DELIVERY_STATE);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [employeeName, setEmployeeName] = useState('');
   const [roleFilter, setRoleFilter] = useState<'todos' | ChecklistRole>('todos');
   const [activeRun, setActiveRun] = useState<ChecklistRun | null>(null);
@@ -101,7 +115,9 @@ export function StaffPortalPage() {
   useEffect(() => {
     setIsDark(document.documentElement.classList.contains('dark'));
     try {
+      const savedId = localStorage.getItem(STAFF_ID_KEY);
       const savedName = localStorage.getItem(STAFF_NAME_KEY);
+      if (savedId) setSelectedEmployeeId(savedId);
       if (savedName) setEmployeeName(savedName);
     } catch {
       // ignore
@@ -120,6 +136,16 @@ export function StaffPortalPage() {
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, [loadFromSources]);
+
+  const activeEmployees = useMemo(
+    () => (state.employees ?? []).filter((e) => e.status !== 'inativo'),
+    [state.employees],
+  );
+
+  const selectedEmployee = useMemo(
+    () => activeEmployees.find((e) => e.id === selectedEmployeeId) ?? null,
+    [activeEmployees, selectedEmployeeId],
+  );
 
   const persistRun = async (run: ChecklistRun) => {
     setState((prev) => {
@@ -143,12 +169,60 @@ export function StaffPortalPage() {
     }).catch(() => {});
   };
 
+  const handleToggleTask = async (
+    taskId: string,
+    nextStatus: StaffTaskStatus,
+  ) => {
+    const nowIso = new Date().toISOString();
+    setState((prev) => {
+      const nextTasks = (prev.staffTasks ?? []).map((t) =>
+        t.id === taskId
+          ? {
+              ...t,
+              status: nextStatus,
+              completedAt: nextStatus === 'concluida' ? nowIso : undefined,
+            }
+          : t,
+      );
+      const next = { ...prev, staffTasks: nextTasks };
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+
+    await fetch('/api/staff', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'toggle_task_status',
+        taskId,
+        nextStatus,
+      }),
+    }).catch(() => {});
+  };
+
   const handleToggleTheme = () => {
     const nextDark = !isDark;
     setIsDark(nextDark);
     document.documentElement.classList.toggle('dark', nextDark);
     try {
       localStorage.setItem('vertice-theme', nextDark ? 'dark' : 'light');
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSelectEmployeeId = (empId: string) => {
+    setSelectedEmployeeId(empId);
+    const emp = activeEmployees.find((e) => e.id === empId);
+    const nextName = emp ? emp.name : '';
+    if (emp) setEmployeeName(emp.name);
+    try {
+      localStorage.setItem(STAFF_ID_KEY, empId);
+      if (nextName) localStorage.setItem(STAFF_NAME_KEY, nextName);
     } catch {
       // ignore
     }
@@ -163,13 +237,38 @@ export function StaffPortalPage() {
     }
   };
 
-  const activeTemplates = useMemo(
-    () =>
-      (state.checklistTemplates ?? []).filter(
-        (t) => t.active && (roleFilter === 'todos' || t.role === roleFilter),
-      ),
-    [state.checklistTemplates, roleFilter],
-  );
+  const activeTemplates = useMemo(() => {
+    const list = (state.checklistTemplates ?? []).filter(
+      (t) => t.active && (roleFilter === 'todos' || t.role === roleFilter),
+    );
+    if (!selectedEmployee) return list;
+    // Prioritize templates directly assigned to this employee or matching their role
+    return [...list].sort((a, b) => {
+      const aDirect = (a.assignedEmployeeIds ?? []).includes(
+        selectedEmployee.id,
+      )
+        ? 2
+        : a.role === selectedEmployee.role
+          ? 1
+          : 0;
+      const bDirect = (b.assignedEmployeeIds ?? []).includes(
+        selectedEmployee.id,
+      )
+        ? 2
+        : b.role === selectedEmployee.role
+          ? 1
+          : 0;
+      return bDirect - aDirect;
+    });
+  }, [state.checklistTemplates, roleFilter, selectedEmployee]);
+
+  const myTasks = useMemo(() => {
+    const list = state.staffTasks ?? [];
+    if (selectedEmployee) {
+      return list.filter((t) => t.employeeId === selectedEmployee.id);
+    }
+    return list.filter((t) => t.status !== 'concluida');
+  }, [state.staffTasks, selectedEmployee]);
 
   const recentRuns = useMemo(
     () => (state.checklistRuns ?? []).slice(0, 6),
@@ -177,7 +276,8 @@ export function StaffPortalPage() {
   );
 
   const handleStartChecklist = (tpl: ChecklistTemplate) => {
-    const cleanName = employeeName.trim() || 'Funcionário do Turno';
+    const cleanName =
+      selectedEmployee?.name || employeeName.trim() || 'Funcionário do Turno';
     const existingInProgress = (state.checklistRuns ?? []).find(
       (r) =>
         r.templateId === tpl.id &&
@@ -197,6 +297,7 @@ export function StaffPortalPage() {
       templateTitle: tpl.title,
       role: tpl.role,
       shift: tpl.shift,
+      employeeId: selectedEmployee?.id,
       employeeName: cleanName,
       status: 'em_andamento',
       startedAt: new Date().toISOString(),
@@ -344,20 +445,40 @@ export function StaffPortalPage() {
           <div className="flex items-center gap-2">
             <UserCheck className="w-4 h-4 text-brand-600 dark:text-brand-400" />
             <label
-              htmlFor="staff-name-input"
+              htmlFor="staff-select-employee"
               className="text-sm font-bold text-slate-900 dark:text-white"
             >
               Quem está executando o turno?
             </label>
           </div>
-          <input
-            id="staff-name-input"
-            type="text"
-            value={employeeName}
-            onChange={(e) => handleEmployeeNameChange(e.target.value)}
-            placeholder="Digite seu nome completo (ex.: Dona Maria, João Silva)"
-            className="w-full min-h-[44px] px-3.5 py-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-          />
+          {activeEmployees.length > 0 && (
+            <select
+              id="staff-select-employee"
+              value={selectedEmployeeId}
+              onChange={(e) => handleSelectEmployeeId(e.target.value)}
+              className="w-full min-h-[44px] px-3.5 py-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+            >
+              <option value="">Selecionar colaborador cadastrado...</option>
+              {activeEmployees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.name} · {CHECKLIST_ROLE_LABEL[emp.role]}
+                </option>
+              ))}
+              <option value="custom">Outro colaborador (digitar nome)</option>
+            </select>
+          )}
+          {(!activeEmployees.length ||
+            !selectedEmployeeId ||
+            selectedEmployeeId === 'custom') && (
+            <input
+              id="staff-name-input"
+              type="text"
+              value={employeeName}
+              onChange={(e) => handleEmployeeNameChange(e.target.value)}
+              placeholder="Digite seu nome completo (ex.: Dona Maria, João Silva)"
+              className="w-full min-h-[44px] px-3.5 py-2.5 text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+            />
+          )}
         </section>
 
         {activeRun ? (
@@ -508,46 +629,149 @@ export function StaffPortalPage() {
                 ))}
               </div>
 
+              {myTasks.length > 0 && (
+                <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                      {selectedEmployee
+                        ? `Tarefas Atribuídas para ${selectedEmployee.name}`
+                        : 'Tarefas Operacionais Abertas'}
+                    </h2>
+                    <span className="text-xs font-mono-tabular text-slate-500">
+                      {myTasks.filter((t) => t.status !== 'concluida').length}{' '}
+                      pendente(s)
+                    </span>
+                  </div>
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {myTasks.map((task) => {
+                      const nextStatus: StaffTaskStatus =
+                        task.status === 'pendente'
+                          ? 'em_andamento'
+                          : task.status === 'em_andamento'
+                            ? 'concluida'
+                            : 'pendente';
+                      return (
+                        <div
+                          key={task.id}
+                          className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                        >
+                          <div className="min-w-0 space-y-0.5">
+                            <p className="text-[11px] font-medium text-slate-500">
+                              <span
+                                className={
+                                  task.status === 'concluida'
+                                    ? 'text-emerald-700 dark:text-emerald-400 font-semibold'
+                                    : task.status === 'em_andamento'
+                                      ? 'text-blue-700 dark:text-blue-400 font-semibold'
+                                      : 'text-amber-700 dark:text-amber-400 font-semibold'
+                                }
+                              >
+                                {TASK_STATUS_LABEL[task.status]}
+                              </span>
+                              {' · '}
+                              <span>{TASK_PRIORITY_LABEL[task.priority]}</span>
+                              {task.dueLabel ? ` · ${task.dueLabel}` : ''}
+                              {!selectedEmployee
+                                ? ` · ${task.employeeName}`
+                                : ''}
+                            </p>
+                            <p
+                              className={`text-sm font-semibold ${
+                                task.status === 'concluida'
+                                  ? 'line-through text-slate-400'
+                                  : 'text-slate-900 dark:text-white'
+                              }`}
+                            >
+                              {task.title}
+                            </p>
+                            {task.description && (
+                              <p className="text-xs text-slate-500">
+                                {task.description}
+                              </p>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleToggleTask(task.id, nextStatus)
+                            }
+                            className={`min-h-[40px] px-3.5 py-2 text-xs font-semibold rounded-lg border shrink-0 transition-colors ${
+                              task.status === 'concluida'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
+                                : 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900 dark:border-white'
+                            }`}
+                          >
+                            {task.status === 'pendente'
+                              ? 'Iniciar Tarefa'
+                              : task.status === 'em_andamento'
+                                ? 'Concluir Tarefa'
+                                : 'Reabrir'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
               {activeTemplates.length === 0 ? (
                 <div className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-8 text-center text-sm text-slate-500">
                   Nenhum checklist ativo disponível para este setor.
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {activeTemplates.map((tpl) => (
-                    <article
-                      key={tpl.id}
-                      className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                    >
-                      <div className="space-y-1 min-w-0">
-                        <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                          {CHECKLIST_ROLE_LABEL[tpl.role]} ·{' '}
-                          {CHECKLIST_SHIFT_LABEL[tpl.shift]} ·{' '}
-                          {CHECKLIST_FREQUENCY_LABEL[tpl.frequency]}
-                        </p>
-                        <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                          {tpl.title}
-                        </h2>
-                        {tpl.description && (
-                          <p className="text-xs text-slate-600 dark:text-slate-400">
-                            {tpl.description}
-                          </p>
-                        )}
-                        <p className="text-xs font-mono-tabular text-slate-500 pt-1">
-                          {tpl.items.length} etapas ·{' '}
-                          {tpl.items.filter((i) => i.critical).length} críticas
-                        </p>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleStartChecklist(tpl)}
-                        className="min-h-[48px] px-5 py-3 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-xl shrink-0 transition-colors"
+                  {activeTemplates.map((tpl) => {
+                    const isDirectlyLinked = Boolean(
+                      selectedEmployee &&
+                        (tpl.assignedEmployeeIds ?? []).includes(
+                          selectedEmployee.id,
+                        ),
+                    );
+                    return (
+                      <article
+                        key={tpl.id}
+                        className={`bg-white dark:bg-[#13151c] border rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                          isDirectlyLinked
+                            ? 'border-brand-300 dark:border-brand-700'
+                            : 'border-slate-200 dark:border-slate-800'
+                        }`}
                       >
-                        Seguir Checklist
-                      </button>
-                    </article>
-                  ))}
+                        <div className="space-y-1 min-w-0">
+                          <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                            {isDirectlyLinked && (
+                              <span className="font-bold text-brand-600 dark:text-brand-400">
+                                Vinculado a você ·{' '}
+                              </span>
+                            )}
+                            {CHECKLIST_ROLE_LABEL[tpl.role]} ·{' '}
+                            {CHECKLIST_SHIFT_LABEL[tpl.shift]} ·{' '}
+                            {CHECKLIST_FREQUENCY_LABEL[tpl.frequency]}
+                          </p>
+                          <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                            {tpl.title}
+                          </h2>
+                          {tpl.description && (
+                            <p className="text-xs text-slate-600 dark:text-slate-400">
+                              {tpl.description}
+                            </p>
+                          )}
+                          <p className="text-xs font-mono-tabular text-slate-500 pt-1">
+                            {tpl.items.length} etapas ·{' '}
+                            {tpl.items.filter((i) => i.critical).length} críticas
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleStartChecklist(tpl)}
+                          className="min-h-[48px] px-5 py-3 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 rounded-xl shrink-0 transition-colors"
+                        >
+                          Seguir Checklist
+                        </button>
+                      </article>
+                    );
+                  })}
                 </div>
               )}
             </section>

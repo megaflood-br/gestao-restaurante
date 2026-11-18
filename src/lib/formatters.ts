@@ -3,11 +3,16 @@ import type {
   ChecklistRole,
   ChecklistShift,
   CourierStatus,
+  EmployeeLedgerType,
+  EmployeePayType,
+  EmployeeStatus,
   LoyaltyPromotionType,
   LoyaltyRewardType,
   OrderSource,
   OrderStatus,
   PaymentMethod,
+  StaffTaskPriority,
+  StaffTaskStatus,
   WasteReason,
 } from '@/types/delivery';
 
@@ -140,4 +145,34 @@ export const LOYALTY_REWARD_TYPE_LABEL: Record<LoyaltyRewardType, string> = {
   desconto_percentual: 'Desconto %',
   brinde_item: 'Prato / Bebida Grátis',
   frete_gratis: 'Entrega Grátis',
+};
+
+export const EMPLOYEE_PAY_TYPE_LABEL: Record<EmployeePayType, string> = {
+  mensal: 'Salário Mensal',
+  diaria: 'Por Diária',
+  hora: 'Por Hora / Turno',
+};
+
+export const EMPLOYEE_STATUS_LABEL: Record<EmployeeStatus, string> = {
+  ativo: 'Ativo',
+  ferias: 'Férias / Afastado',
+  inativo: 'Desligado',
+};
+
+export const LEDGER_TYPE_LABEL: Record<EmployeeLedgerType, string> = {
+  vale: 'Vale / Adiantamento',
+  consumo: 'Consumo Interno',
+  pagamento: 'Pagamento Salarial',
+  bonus: 'Bônus / Adicional',
+};
+
+export const TASK_PRIORITY_LABEL: Record<StaffTaskPriority, string> = {
+  normal: 'Normal',
+  alta: 'Prioritária',
+};
+
+export const TASK_STATUS_LABEL: Record<StaffTaskStatus, string> = {
+  pendente: 'Pendente',
+  em_andamento: 'Em Andamento',
+  concluida: 'Concluída',
 };
