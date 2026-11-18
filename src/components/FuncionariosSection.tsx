@@ -33,6 +33,7 @@ import {
   LEDGER_TYPE_LABEL,
   TASK_PRIORITY_LABEL,
   TASK_STATUS_LABEL,
+  WEEKDAY_LABEL,
   formatCurrencyBRL,
   formatDateTimeBR,
 } from '@/lib/formatters';
@@ -103,7 +104,13 @@ const SHIFT_OPTIONS: ChecklistShift[] = [
   'geral',
 ];
 
-const PAY_TYPE_OPTIONS: EmployeePayType[] = ['mensal', 'diaria', 'hora'];
+const PAY_TYPE_OPTIONS: EmployeePayType[] = [
+  'mensal',
+  'semanal',
+  'quinzenal',
+  'diaria',
+  'hora',
+];
 const STATUS_OPTIONS: EmployeeStatus[] = ['ativo', 'ferias', 'inativo'];
 
 const NEXT_TASK_STATUS: Record<StaffTaskStatus, StaffTaskStatus> = {
@@ -167,6 +174,7 @@ export function FuncionariosSection({
   const [empPayType, setEmpPayType] = useState<EmployeePayType>('mensal');
   const [empSalary, setEmpSalary] = useState('2200');
   const [empPayDay, setEmpPayDay] = useState('5');
+  const [empPayWeekday, setEmpPayWeekday] = useState<number>(5);
   const [empPixKey, setEmpPixKey] = useState('');
   const [empAdmissionDate, setEmpAdmissionDate] = useState(
     new Date().toISOString().slice(0, 10),
@@ -350,6 +358,7 @@ export function FuncionariosSection({
     setEmpPayType('mensal');
     setEmpSalary('2200');
     setEmpPayDay('5');
+    setEmpPayWeekday(5);
     setEmpPixKey('');
     setEmpAdmissionDate(new Date().toISOString().slice(0, 10));
     setEmpStatus('ativo');
@@ -366,6 +375,7 @@ export function FuncionariosSection({
     setEmpPayType(emp.payType);
     setEmpSalary(String(emp.baseSalary));
     setEmpPayDay(String(emp.payDay));
+    setEmpPayWeekday(typeof emp.payWeekday === 'number' ? emp.payWeekday : 5);
     setEmpPixKey(emp.pixKey ?? '');
     setEmpAdmissionDate(emp.admissionDate);
     setEmpStatus(emp.status);
@@ -393,6 +403,7 @@ export function FuncionariosSection({
       payType: empPayType,
       baseSalary: salaryNum,
       payDay: payDayNum,
+      payWeekday: empPayType === 'semanal' ? empPayWeekday : undefined,
       pixKey: empPixKey.trim() || undefined,
       admissionDate: empAdmissionDate || nowIso.slice(0, 10),
       status: empStatus,
@@ -449,9 +460,15 @@ export function FuncionariosSection({
       ];
       setSettleSelectedIds(ids);
       setLedgerAmount(String(selectedPayroll.netPayable.toFixed(2)));
-      setLedgerDesc(
-        `Pagamento ${EMPLOYEE_PAY_TYPE_LABEL[selectedEmployee.payType]} (${today.slice(0, 7)})`,
-      );
+      let defaultPayDesc = `Pagamento ${EMPLOYEE_PAY_TYPE_LABEL[selectedEmployee.payType]} (${today.slice(0, 7)})`;
+      if (selectedEmployee.payType === 'semanal') {
+        const end = new Date();
+        const start = new Date(end.getTime() - 6 * 86400000);
+        const fmt = (d: Date) =>
+          d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+        defaultPayDesc = `Pagamento Semanal (${fmt(start)} a ${fmt(end)})`;
+      }
+      setLedgerDesc(defaultPayDesc);
       setLedgerDeductFromPay(false);
       setLedgerLaunchToFinance(true);
       setLedgerSendWhatsapp(Boolean(selectedEmployee.phone));
@@ -942,7 +959,7 @@ export function FuncionariosSection({
                           </p>
                           <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
                             {CHECKLIST_ROLE_LABEL[emp.role]} ·{' '}
-                            {CHECKLIST_SHIFT_LABEL[emp.defaultShift]}
+                            {EMPLOYEE_PAY_TYPE_LABEL[emp.payType]}
                           </p>
                         </div>
                         <span
@@ -1028,7 +1045,9 @@ export function FuncionariosSection({
                         {selectedEmployee.pixKey
                           ? ` · Pix: ${selectedEmployee.pixKey}`
                           : ''}
-                        {` · Dia pgto: ${selectedEmployee.payDay}`}
+                        {selectedEmployee.payType === 'semanal'
+                          ? ` · Pgto: Toda ${WEEKDAY_LABEL[selectedEmployee.payWeekday ?? 5]}`
+                          : ` · Dia pgto: ${selectedEmployee.payDay}`}
                       </p>
                     </div>
 
@@ -1169,9 +1188,13 @@ export function FuncionariosSection({
                         <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
                           {selectedEmployee.payType === 'mensal'
                             ? 'Salário Base'
-                            : selectedEmployee.payType === 'diaria'
-                              ? 'Valor da Diária'
-                              : 'Valor Base'}
+                            : selectedEmployee.payType === 'semanal'
+                              ? 'Valor Semanal'
+                              : selectedEmployee.payType === 'quinzenal'
+                                ? 'Valor Quinzenal'
+                                : selectedEmployee.payType === 'diaria'
+                                  ? 'Valor da Diária'
+                                  : 'Valor Hora / Base'}
                         </p>
                         <p className="text-base font-bold font-mono-tabular text-slate-900 dark:text-white mt-0.5">
                           {formatCurrencyBRL(selectedPayroll.grossBase)}
@@ -2046,7 +2069,7 @@ export function FuncionariosSection({
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    WhatsApp (DDD + Número)
+                    WhatsApp / Celular (DDD + Número)
                   </label>
                   <input
                     value={empPhone}
@@ -2054,6 +2077,9 @@ export function FuncionariosSection({
                     placeholder="Ex.: 5511999998888"
                     className="w-full px-3 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
                   />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Usado para envio de comprovantes e login do funcionário em /equipe.
+                  </p>
                 </div>
               </div>
 
@@ -2121,9 +2147,13 @@ export function FuncionariosSection({
                   </label>
                   <select
                     value={empPayType}
-                    onChange={(e) =>
-                      setEmpPayType(e.target.value as EmployeePayType)
-                    }
+                    onChange={(e) => {
+                      const nextType = e.target.value as EmployeePayType;
+                      setEmpPayType(nextType);
+                      if (!editingEmp && empSalary === '2200' && nextType === 'semanal') {
+                        setEmpSalary('600');
+                      }
+                    }}
                     className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
                   >
                     {PAY_TYPE_OPTIONS.map((p) => (
@@ -2135,7 +2165,15 @@ export function FuncionariosSection({
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Valor Base (R$)
+                    {empPayType === 'semanal'
+                      ? 'Valor Semanal (R$)'
+                      : empPayType === 'quinzenal'
+                        ? 'Valor Quinzenal (R$)'
+                        : empPayType === 'diaria'
+                          ? 'Valor Diária (R$)'
+                          : empPayType === 'hora'
+                            ? 'Valor Hora (R$)'
+                            : 'Salário Base (R$)'}
                   </label>
                   <input
                     required
@@ -2148,17 +2186,40 @@ export function FuncionariosSection({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    Dia Pagamento
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="31"
-                    value={empPayDay}
-                    onChange={(e) => setEmpPayDay(e.target.value)}
-                    className="w-full px-3 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-                  />
+                  {empPayType === 'semanal' ? (
+                    <>
+                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                        Dia da Semana (Pgto)
+                      </label>
+                      <select
+                        value={empPayWeekday}
+                        onChange={(e) =>
+                          setEmpPayWeekday(Number(e.target.value))
+                        }
+                        className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      >
+                        {[1, 2, 3, 4, 5, 6, 0].map((dayNum) => (
+                          <option key={dayNum} value={dayNum}>
+                            {WEEKDAY_LABEL[dayNum]}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  ) : (
+                    <>
+                      <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
+                        Dia Pagamento (Mês)
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="31"
+                        value={empPayDay}
+                        onChange={(e) => setEmpPayDay(e.target.value)}
+                        className="w-full px-3 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </>
+                  )}
                 </div>
               </div>
 

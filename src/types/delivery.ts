@@ -540,7 +540,12 @@ export interface LoyaltyTransaction {
   createdAt: string;
 }
 
-export type EmployeePayType = 'mensal' | 'diaria' | 'hora';
+export type EmployeePayType =
+  | 'mensal'
+  | 'semanal'
+  | 'quinzenal'
+  | 'diaria'
+  | 'hora';
 
 export type EmployeeStatus = 'ativo' | 'ferias' | 'inativo';
 
@@ -553,6 +558,7 @@ export interface Employee {
   payType: EmployeePayType;
   baseSalary: number;
   payDay: number;
+  payWeekday?: number;
   pixKey?: string;
   admissionDate: string;
   status: EmployeeStatus;

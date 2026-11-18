@@ -149,8 +149,20 @@ export const LOYALTY_REWARD_TYPE_LABEL: Record<LoyaltyRewardType, string> = {
 
 export const EMPLOYEE_PAY_TYPE_LABEL: Record<EmployeePayType, string> = {
   mensal: 'Salário Mensal',
+  semanal: 'Pagamento Semanal',
+  quinzenal: 'Pagamento Quinzenal',
   diaria: 'Por Diária',
   hora: 'Por Hora / Turno',
+};
+
+export const WEEKDAY_LABEL: Record<number, string> = {
+  0: 'Domingo',
+  1: 'Segunda-feira',
+  2: 'Terça-feira',
+  3: 'Quarta-feira',
+  4: 'Quinta-feira',
+  5: 'Sexta-feira',
+  6: 'Sábado',
 };
 
 export const EMPLOYEE_STATUS_LABEL: Record<EmployeeStatus, string> = {

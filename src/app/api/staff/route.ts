@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDeliveryStore } from '@/lib/server-store';
-import { normalizePhoneDigits } from '@/lib/crm-engine';
+import { normalizePhoneDigits, phonesMatch } from '@/lib/crm-engine';
 import {
   getEvolutionEnvConfig,
   isPhoneOptedOut,
@@ -28,12 +28,14 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as {
       action:
+        | 'login_by_phone'
         | 'upsert_employee'
         | 'upsert_task'
         | 'toggle_task_status'
         | 'toggle_checklist_link'
         | 'add_ledger_entry'
         | 'send_receipt_whatsapp';
+      phone?: string;
       employee?: Employee;
       task?: StaffTask;
       taskId?: string;
@@ -50,6 +52,58 @@ export async function POST(request: NextRequest) {
 
     const db = getDeliveryStore();
     const now = new Date().toISOString();
+
+    if (body.action === 'login_by_phone') {
+      const digits = normalizePhoneDigits(body.phone);
+      if (digits.length < 8) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              'Informe um número de celular válido com DDD (mínimo 8 dígitos).',
+          },
+          { status: 400 },
+        );
+      }
+
+      const activeMatch = db.employees.find(
+        (e) => e.status !== 'inativo' && phonesMatch(e.phone, digits),
+      );
+      const anyMatch =
+        activeMatch ?? db.employees.find((e) => phonesMatch(e.phone, digits));
+
+      if (!anyMatch) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: 'Nenhum colaborador encontrado com este número de celular.',
+          },
+          { status: 404 },
+        );
+      }
+
+      if (anyMatch.status === 'inativo') {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              'Cadastro inativo. Fale com a gerência para liberar seu acesso.',
+          },
+          { status: 403 },
+        );
+      }
+
+      return NextResponse.json({
+        ok: true,
+        employee: anyMatch,
+        staffTasks: db.staffTasks.filter((t) => t.employeeId === anyMatch.id),
+        employeeLedger: db.employeeLedger.filter(
+          (l) => l.employeeId === anyMatch.id,
+        ),
+        checklistTemplates: db.checklistTemplates,
+        checklistRuns: db.checklistRuns,
+      });
+    }
 
     if (body.action === 'upsert_employee' && body.employee) {
       const cleanPhone = normalizePhoneDigits(body.employee.phone);
