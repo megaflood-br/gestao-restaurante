@@ -1,7 +1,16 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Award, Minus, Navigation, Plus, Search, UserCheck, X } from 'lucide-react';
+import {
+  Award,
+  Check,
+  Minus,
+  Navigation,
+  Plus,
+  Search,
+  UserCheck,
+  X,
+} from 'lucide-react';
 import { formatCurrencyBRL } from '@/lib/formatters';
 import { calculateDeliveryQuote } from '@/lib/delivery-pricing';
 import {
@@ -9,6 +18,7 @@ import {
   findCustomerByPhone,
   formatPhoneBR,
   getAvailableRewardsForCustomer,
+  normalizePhoneDigits,
 } from '@/lib/crm-engine';
 import type {
   CrmCustomer,
@@ -34,6 +44,14 @@ interface ManualOrderModalProps {
   onOrderCreated: (order: Order, sideEffects?: OrderCreatedSideEffects) => void;
 }
 
+function normalizeSearchText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
 export function ManualOrderModal({
   open,
   onClose,
@@ -47,6 +65,9 @@ export function ManualOrderModal({
   const [crmSearch, setCrmSearch] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [nameDropdownOpen, setNameDropdownOpen] = useState(false);
+  const [phoneDropdownOpen, setPhoneDropdownOpen] = useState(false);
+  const [highlightedIdx, setHighlightedIdx] = useState(0);
   const [address, setAddress] = useState('');
   const [neighborhood, setNeighborhood] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pix');
@@ -61,6 +82,9 @@ export function ManualOrderModal({
   const [distanceHint, setDistanceHint] = useState<string | null>(null);
 
   const applyCustomerToForm = (customer: CrmCustomer | null) => {
+    setNameDropdownOpen(false);
+    setPhoneDropdownOpen(false);
+    setHighlightedIdx(0);
     if (!customer) {
       setSelectedCustomerId('');
       setSelectedRewardId('');
@@ -86,15 +110,40 @@ export function ManualOrderModal({
   const customers = state.customers ?? [];
 
   const filteredCrmCustomers = useMemo(() => {
-    const q = crmSearch.trim().toLowerCase();
+    const q = normalizeSearchText(crmSearch);
+    const digits = normalizePhoneDigits(crmSearch);
     if (!q) return customers;
     return customers.filter(
       (c) =>
-        c.name.toLowerCase().includes(q) ||
-        c.phone.includes(q.replace(/\D/g, '') || q) ||
-        c.neighborhood.toLowerCase().includes(q),
+        normalizeSearchText(c.name).includes(q) ||
+        (digits.length >= 2 && normalizePhoneDigits(c.phone).includes(digits)) ||
+        normalizeSearchText(c.neighborhood).includes(q),
     );
   }, [customers, crmSearch]);
+
+  const nameSuggestions = useMemo(() => {
+    const q = normalizeSearchText(customerName);
+    const qDigits = normalizePhoneDigits(customerName);
+    const base = !q
+      ? customers.slice(0, 6)
+      : customers.filter(
+          (c) =>
+            normalizeSearchText(c.name).includes(q) ||
+            (qDigits.length >= 3 &&
+              normalizePhoneDigits(c.phone).includes(qDigits)) ||
+            normalizeSearchText(c.neighborhood).includes(q) ||
+            normalizeSearchText(c.address).includes(q),
+        );
+    return base.slice(0, 7);
+  }, [customers, customerName]);
+
+  const phoneSuggestions = useMemo(() => {
+    const digits = normalizePhoneDigits(customerPhone);
+    if (digits.length < 2) return [];
+    return customers
+      .filter((c) => normalizePhoneDigits(c.phone).includes(digits))
+      .slice(0, 6);
+  }, [customers, customerPhone]);
 
   const matchedCustomer = useMemo(() => {
     if (selectedCustomerId) {
@@ -426,23 +475,131 @@ export function ManualOrderModal({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label
-                  htmlFor="man-name"
-                  className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-                >
-                  Nome do Cliente
-                </label>
+              <div className="relative">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <label
+                    htmlFor="man-name"
+                    className="block text-xs font-medium text-slate-700 dark:text-slate-300"
+                  >
+                    Nome do Cliente
+                  </label>
+                  {matchedCustomer ? (
+                    <button
+                      type="button"
+                      onClick={() => applyCustomerToForm(null)}
+                      className="text-[11px] font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                    >
+                      Desvincular CRM
+                    </button>
+                  ) : (
+                    <span className="text-[11px] text-slate-400">
+                      Autocompletar no CRM
+                    </span>
+                  )}
+                </div>
                 <input
                   id="man-name"
                   required
+                  autoComplete="off"
+                  role="combobox"
+                  aria-expanded={nameDropdownOpen && nameSuggestions.length > 0}
+                  aria-autocomplete="list"
+                  aria-controls="man-name-autocomplete"
                   value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="Ex.: Carlos Eduardo"
-                  className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                  onFocus={() => {
+                    if (customers.length > 0 && !selectedCustomerId) {
+                      setNameDropdownOpen(true);
+                      setHighlightedIdx(0);
+                    }
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => setNameDropdownOpen(false), 120);
+                  }}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setCustomerName(val);
+                    if (selectedCustomerId) setSelectedCustomerId('');
+                    setNameDropdownOpen(true);
+                    setHighlightedIdx(0);
+                  }}
+                  onKeyDown={(e) => {
+                    if (!nameDropdownOpen || nameSuggestions.length === 0) {
+                      return;
+                    }
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setHighlightedIdx((prev) =>
+                        (prev + 1) % nameSuggestions.length,
+                      );
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setHighlightedIdx((prev) =>
+                        (prev - 1 + nameSuggestions.length) %
+                        nameSuggestions.length,
+                      );
+                    } else if (e.key === 'Enter') {
+                      const picked = nameSuggestions[highlightedIdx];
+                      if (picked) {
+                        e.preventDefault();
+                        applyCustomerToForm(picked);
+                      }
+                    } else if (e.key === 'Escape') {
+                      setNameDropdownOpen(false);
+                    }
+                  }}
+                  placeholder="Digite o nome para buscar ou cadastrar..."
+                  className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                 />
+
+                {nameDropdownOpen && nameSuggestions.length > 0 && (
+                  <div
+                    id="man-name-autocomplete"
+                    role="listbox"
+                    className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-60 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800"
+                  >
+                    {nameSuggestions.map((c, idx) => {
+                      const isActive = idx === highlightedIdx;
+                      const isSelected = selectedCustomerId === c.id;
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          role="option"
+                          aria-selected={isSelected}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => applyCustomerToForm(c)}
+                          className={`w-full text-left px-3 py-2.5 text-xs transition-colors flex items-start justify-between gap-2 ${
+                            isActive
+                              ? 'bg-slate-100 dark:bg-slate-800'
+                              : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                          }`}
+                        >
+                          <div className="min-w-0 space-y-0.5">
+                            <p className="font-semibold text-slate-900 dark:text-white truncate flex items-center gap-1.5">
+                              <span>{c.name}</span>
+                              {isSelected && (
+                                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              )}
+                            </p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                              <span className="font-mono-tabular">
+                                {formatPhoneBR(c.phone)}
+                              </span>
+                              {c.neighborhood ? ` · ${c.neighborhood}` : ''}
+                              {c.address ? ` · ${c.address}` : ''}
+                            </p>
+                          </div>
+                          <span className="text-[11px] font-mono-tabular font-semibold text-brand-600 dark:text-brand-400 shrink-0">
+                            {c.pointsBalance} pts
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-              <div>
+
+              <div className="relative">
                 <label
                   htmlFor="man-phone"
                   className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
@@ -452,14 +609,87 @@ export function ManualOrderModal({
                 <input
                   id="man-phone"
                   required
+                  autoComplete="off"
                   value={customerPhone}
+                  onFocus={() => {
+                    if (phoneSuggestions.length > 0 && !selectedCustomerId) {
+                      setPhoneDropdownOpen(true);
+                      setHighlightedIdx(0);
+                    }
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => setPhoneDropdownOpen(false), 120);
+                  }}
                   onChange={(e) => {
                     setCustomerPhone(e.target.value);
                     if (selectedCustomerId) setSelectedCustomerId('');
+                    setPhoneDropdownOpen(true);
+                    setHighlightedIdx(0);
+                  }}
+                  onKeyDown={(e) => {
+                    if (!phoneDropdownOpen || phoneSuggestions.length === 0) {
+                      return;
+                    }
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setHighlightedIdx((prev) =>
+                        (prev + 1) % phoneSuggestions.length,
+                      );
+                    } else if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setHighlightedIdx((prev) =>
+                        (prev - 1 + phoneSuggestions.length) %
+                        phoneSuggestions.length,
+                      );
+                    } else if (e.key === 'Enter') {
+                      const picked = phoneSuggestions[highlightedIdx];
+                      if (picked) {
+                        e.preventDefault();
+                        applyCustomerToForm(picked);
+                      }
+                    } else if (e.key === 'Escape') {
+                      setPhoneDropdownOpen(false);
+                    }
                   }}
                   placeholder="(11) 99999-9999"
-                  className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                  className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500"
                 />
+
+                {phoneDropdownOpen && phoneSuggestions.length > 0 && (
+                  <div
+                    role="listbox"
+                    className="absolute left-0 right-0 top-full mt-1 z-30 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800"
+                  >
+                    {phoneSuggestions.map((c, idx) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        role="option"
+                        aria-selected={selectedCustomerId === c.id}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => applyCustomerToForm(c)}
+                        className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between gap-2 ${
+                          idx === highlightedIdx
+                            ? 'bg-slate-100 dark:bg-slate-800'
+                            : 'hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <p className="font-semibold text-slate-900 dark:text-white truncate">
+                            {c.name}
+                          </p>
+                          <p className="text-[11px] font-mono-tabular text-slate-500 truncate">
+                            {formatPhoneBR(c.phone)}
+                            {c.neighborhood ? ` · ${c.neighborhood}` : ''}
+                          </p>
+                        </div>
+                        <span className="text-[11px] font-mono-tabular font-semibold text-brand-600 dark:text-brand-400 shrink-0">
+                          {c.pointsBalance} pts
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
