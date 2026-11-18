@@ -102,6 +102,10 @@ export async function POST(request: NextRequest) {
         ),
         checklistTemplates: db.checklistTemplates,
         checklistRuns: db.checklistRuns,
+        ingredients: db.ingredients,
+        menuItems: db.menuItems,
+        stockMovements: db.stockMovements,
+        wasteLogs: db.wasteLogs,
       });
     }
 

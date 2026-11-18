@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDeliveryStore } from '@/lib/server-store';
+import { normalizePhoneDigits, phonesMatch } from '@/lib/crm-engine';
 import type { Courier, CourierStatus } from '@/types/delivery';
 
 export async function GET() {
@@ -10,15 +11,67 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as {
-      name: string;
-      phone: string;
-      vehicle: string;
-      plate: string;
+      action?: 'login_by_phone';
+      name?: string;
+      phone?: string;
+      vehicle?: string;
+      plate?: string;
       pixKey?: string;
       feePerDelivery?: number;
       fixedDailyPay?: number;
     };
     const db = getDeliveryStore();
+
+    if (body.action === 'login_by_phone') {
+      const digits = normalizePhoneDigits(body.phone);
+      if (digits.length < 8) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              'Informe um número de WhatsApp válido com DDD (mínimo 8 dígitos).',
+          },
+          { status: 400 },
+        );
+      }
+
+      const activeMatch = db.couriers.find(
+        (c) => c.active !== false && phonesMatch(c.phone, digits),
+      );
+      const anyMatch =
+        activeMatch ?? db.couriers.find((c) => phonesMatch(c.phone, digits));
+
+      if (!anyMatch) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: 'Nenhum entregador encontrado com este WhatsApp.',
+          },
+          { status: 404 },
+        );
+      }
+
+      if (anyMatch.active === false) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              'Cadastro de entregador inativo. Fale com a gerência para reativar.',
+          },
+          { status: 403 },
+        );
+      }
+
+      return NextResponse.json({
+        ok: true,
+        courier: anyMatch,
+        couriers: db.couriers,
+        orders: db.orders,
+        courierSettlements: db.courierSettlements.filter(
+          (s) => s.courierId === anyMatch.id,
+        ),
+      });
+    }
 
     if (!body.name?.trim() || !body.phone?.trim()) {
       return NextResponse.json(

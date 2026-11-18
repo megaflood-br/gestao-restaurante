@@ -1,11 +1,20 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import {
+  AlertCircle,
   AlertTriangle,
   Bike,
+  Check,
   CheckCircle2,
   Clock,
+  Copy,
   LogOut,
   MapPin,
   MessageSquare,
@@ -17,19 +26,28 @@ import {
   ShieldCheck,
   Sun,
   Truck,
+  Wallet,
   X,
 } from 'lucide-react';
 import { CourierGpsMap, type LatLngPoint } from '@/components/CourierGpsMap';
+import {
+  formatPhoneBR,
+  normalizePhoneDigits,
+  phonesMatch,
+} from '@/lib/crm-engine';
 import { INITIAL_DELIVERY_STATE } from '@/lib/delivery-seed';
 import {
-  COURIER_STATUS_LABEL,
   formatCurrencyBRL,
+  formatDateTimeBR,
   formatTimeBR,
+  LEDGER_TYPE_LABEL,
   ORDER_STATUS_META,
   PAYMENT_METHOD_LABEL,
 } from '@/lib/formatters';
+import { formatDateBRFromYMD } from '@/lib/staff-engine';
 import type {
   Courier,
+  CourierSettlement,
   CourierStatus,
   DeliveryStoreState,
   Order,
@@ -38,8 +56,13 @@ import type {
 
 const STORAGE_KEY = 'casa-tempero-delivery-v1';
 const COURIER_SESSION_KEY = 'casa-tempero-courier-session';
+const COURIER_PHONE_KEY = 'casa-tempero-courier-phone';
 
-type CourierTab = 'minhas_entregas' | 'disponiveis' | 'concluidas';
+type CourierTab =
+  | 'minhas_entregas'
+  | 'disponiveis'
+  | 'concluidas'
+  | 'pagamentos';
 
 function hydrateDeliveryState(parsed: DeliveryStoreState): DeliveryStoreState {
   return {
@@ -57,12 +80,33 @@ function hydrateDeliveryState(parsed: DeliveryStoreState): DeliveryStoreState {
         },
       },
     },
+    couriers:
+      Array.isArray(parsed.couriers) && parsed.couriers.length > 0
+        ? parsed.couriers
+        : INITIAL_DELIVERY_STATE.couriers,
+    orders: Array.isArray(parsed.orders)
+      ? parsed.orders
+      : INITIAL_DELIVERY_STATE.orders,
+    courierSettlements: Array.isArray(parsed.courierSettlements)
+      ? parsed.courierSettlements
+      : INITIAL_DELIVERY_STATE.courierSettlements,
+    employees: Array.isArray(parsed.employees)
+      ? parsed.employees
+      : INITIAL_DELIVERY_STATE.employees,
+    employeeLedger: Array.isArray(parsed.employeeLedger)
+      ? parsed.employeeLedger
+      : INITIAL_DELIVERY_STATE.employeeLedger,
   };
 }
 
 export function CourierAppPage() {
   const [state, setState] = useState<DeliveryStoreState>(INITIAL_DELIVERY_STATE);
   const [selectedCourierId, setSelectedCourierId] = useState<string>('');
+  const [courierFallback, setCourierFallback] = useState<Courier | null>(null);
+  const [phoneInput, setPhoneInput] = useState<string>('');
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loggingIn, setLoggingIn] = useState(false);
+
   const [activeTab, setActiveTab] = useState<CourierTab>('minhas_entregas');
   const [selectedOrderId, setSelectedOrderId] = useState<string>('');
   const [mapsApiKey, setMapsApiKey] = useState<string>('');
@@ -75,6 +119,9 @@ export function CourierAppPage() {
   const [isDark, setIsDark] = useState(false);
   const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
   const [confirmDeliveryOrder, setConfirmDeliveryOrder] = useState<Order | null>(
+    null,
+  );
+  const [copiedSettlementId, setCopiedSettlementId] = useState<string | null>(
     null,
   );
   const [refreshing, setRefreshing] = useState(false);
@@ -129,27 +176,75 @@ export function CourierAppPage() {
     };
   }, []);
 
-  const syncFromStorageOrServer = useCallback(async (forceServer = false) => {
+  const verifyCourierSessionWithServer = useCallback(async (phone: string) => {
     try {
-      if (!forceServer) {
-        const localRaw = localStorage.getItem(STORAGE_KEY);
-        if (localRaw) {
-          const parsed = JSON.parse(localRaw) as DeliveryStoreState;
-          if (parsed.store && parsed.orders && parsed.couriers) {
-            setState(hydrateDeliveryState(parsed));
-            return;
-          }
-        }
-      }
-      const res = await fetch('/api/delivery');
-      if (res.ok) {
-        const serverData = (await res.json()) as DeliveryStoreState;
-        setState(hydrateDeliveryState(serverData));
+      const res = await fetch('/api/couriers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login_by_phone', phone }),
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        ok?: boolean;
+        courier?: Courier;
+        couriers?: Courier[];
+        orders?: Order[];
+        courierSettlements?: CourierSettlement[];
+      };
+      if (data.ok && data.courier) {
+        setCourierFallback(data.courier);
+        setSelectedCourierId(data.courier.id);
+        setState((prev) => {
+          const existingOtherSettlements = prev.courierSettlements.filter(
+            (s) => s.courierId !== data.courier!.id,
+          );
+          const mergedSettlements = data.courierSettlements
+            ? [...data.courierSettlements, ...existingOtherSettlements]
+            : prev.courierSettlements;
+          return {
+            ...prev,
+            couriers: data.couriers ?? prev.couriers,
+            orders: data.orders ?? prev.orders,
+            courierSettlements: mergedSettlements,
+          };
+        });
       }
     } catch {
       // Keep current state
     }
   }, []);
+
+  const syncFromStorageOrServer = useCallback(
+    async (forceServer = false) => {
+      let loadedLocal = false;
+      try {
+        if (!forceServer) {
+          const localRaw = localStorage.getItem(STORAGE_KEY);
+          if (localRaw) {
+            const parsed = JSON.parse(localRaw) as DeliveryStoreState;
+            if (parsed.store && parsed.orders && parsed.couriers) {
+              setState(hydrateDeliveryState(parsed));
+              loadedLocal = true;
+            }
+          }
+        }
+        if (!loadedLocal) {
+          const res = await fetch('/api/delivery');
+          if (res.ok) {
+            const serverData = (await res.json()) as DeliveryStoreState;
+            setState(hydrateDeliveryState(serverData));
+          }
+        }
+        const savedPhone = localStorage.getItem(COURIER_PHONE_KEY);
+        if (savedPhone) {
+          await verifyCourierSessionWithServer(savedPhone);
+        }
+      } catch {
+        // Keep current state
+      }
+    },
+    [verifyCourierSessionWithServer],
+  );
 
   // Load initial state, courier session (?id= or localStorage), and Maps config
   useEffect(() => {
@@ -160,11 +255,15 @@ export function CourierAppPage() {
       const params = new URLSearchParams(window.location.search);
       const idFromUrl = params.get('id');
       const idFromStorage = localStorage.getItem(COURIER_SESSION_KEY);
+      const phoneFromStorage = localStorage.getItem(COURIER_PHONE_KEY);
       if (idFromUrl) {
         setSelectedCourierId(idFromUrl);
         localStorage.setItem(COURIER_SESSION_KEY, idFromUrl);
       } else if (idFromStorage) {
         setSelectedCourierId(idFromStorage);
+      }
+      if (phoneFromStorage) {
+        setPhoneInput(formatPhoneBR(phoneFromStorage));
       }
     } catch {
       // Ignore query/storage access issues
@@ -238,10 +337,13 @@ export function CourierAppPage() {
     });
   };
 
-  const activeCourier: Courier | null = useMemo(
-    () => state.couriers.find((c) => c.id === selectedCourierId) ?? null,
-    [state.couriers, selectedCourierId],
-  );
+  const activeCourier: Courier | null = useMemo(() => {
+    if (!selectedCourierId) return null;
+    const fromState = state.couriers.find((c) => c.id === selectedCourierId);
+    const candidate = fromState ?? courierFallback;
+    if (!candidate || candidate.active === false) return null;
+    return candidate;
+  }, [state.couriers, selectedCourierId, courierFallback]);
 
   const myActiveOrders = useMemo(
     () =>
@@ -290,8 +392,34 @@ export function CourierAppPage() {
     [state.orders, activeCourier],
   );
 
+  const mySettlements = useMemo(
+    () =>
+      activeCourier
+        ? (state.courierSettlements ?? [])
+            .filter((s) => s.courierId === activeCourier.id)
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        : [],
+    [state.courierSettlements, activeCourier],
+  );
+
+  const matchedEmployeeLedger = useMemo(() => {
+    if (!activeCourier) return [];
+    const emp = (state.employees ?? []).find((e) =>
+      phonesMatch(e.phone, activeCourier.phone),
+    );
+    if (!emp) return [];
+    return (state.employeeLedger ?? []).filter(
+      (entry) => entry.employeeId === emp.id,
+    );
+  }, [activeCourier, state.employees, state.employeeLedger]);
+
   // Auto-select first active order when switching tabs or loading
   useEffect(() => {
+    if (activeTab === 'pagamentos') {
+      setSelectedOrderId('');
+      return;
+    }
+
     const visibleList =
       activeTab === 'minhas_entregas'
         ? myActiveOrders
@@ -320,24 +448,137 @@ export function CourierAppPage() {
     [state.orders, selectedOrderId],
   );
 
-  const handleSelectCourier = (courierId: string) => {
-    setSelectedCourierId(courierId);
-    setFeedback(null);
+  const handleCourierPhoneLogin = async (e: FormEvent) => {
+    e.preventDefault();
+    setLoginError(null);
+    const digits = normalizePhoneDigits(phoneInput);
+    if (digits.length < 8) {
+      setLoginError(
+        'Informe seu número de WhatsApp com DDD (mínimo 8 dígitos).',
+      );
+      return;
+    }
+
+    setLoggingIn(true);
     try {
-      localStorage.setItem(COURIER_SESSION_KEY, courierId);
+      const localActive = state.couriers.find(
+        (c) => c.active !== false && phonesMatch(c.phone, digits),
+      );
+      const localAny =
+        localActive ?? state.couriers.find((c) => phonesMatch(c.phone, digits));
+
+      if (localAny) {
+        if (localAny.active === false) {
+          setLoginError(
+            'Cadastro de entregador inativo. Fale com a gerência para reativar.',
+          );
+          setLoggingIn(false);
+          return;
+        }
+        setSelectedCourierId(localAny.id);
+        setCourierFallback(localAny);
+        setActiveTab('minhas_entregas');
+        setFeedback(null);
+        try {
+          localStorage.setItem(COURIER_SESSION_KEY, localAny.id);
+          localStorage.setItem(
+            COURIER_PHONE_KEY,
+            normalizePhoneDigits(localAny.phone) || digits,
+          );
+        } catch {
+          // Ignore storage failures
+        }
+        // Also refresh settlements/orders silently from server
+        verifyCourierSessionWithServer(
+          normalizePhoneDigits(localAny.phone) || digits,
+        );
+        setLoggingIn(false);
+        return;
+      }
+
+      const res = await fetch('/api/couriers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login_by_phone', phone: digits }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        courier?: Courier;
+        couriers?: Courier[];
+        orders?: Order[];
+        courierSettlements?: CourierSettlement[];
+      };
+
+      if (!res.ok || !data.ok || !data.courier) {
+        setLoginError(
+          data.error || 'Nenhum entregador encontrado com este WhatsApp.',
+        );
+        setLoggingIn(false);
+        return;
+      }
+
+      const found = data.courier;
+      setSelectedCourierId(found.id);
+      setCourierFallback(found);
+      setActiveTab('minhas_entregas');
+      setFeedback(null);
+      setState((prev) => ({
+        ...prev,
+        couriers: data.couriers ?? prev.couriers,
+        orders: data.orders ?? prev.orders,
+        courierSettlements: data.courierSettlements
+          ? [
+              ...data.courierSettlements,
+              ...prev.courierSettlements.filter(
+                (s) => s.courierId !== found.id,
+              ),
+            ]
+          : prev.courierSettlements,
+      }));
+      try {
+        localStorage.setItem(COURIER_SESSION_KEY, found.id);
+        localStorage.setItem(
+          COURIER_PHONE_KEY,
+          normalizePhoneDigits(found.phone) || digits,
+        );
+      } catch {
+        // Ignore storage failures
+      }
     } catch {
-      // Ignore storage failures
+      setLoginError(
+        'Não foi possível validar o WhatsApp agora. Tente novamente.',
+      );
+    } finally {
+      setLoggingIn(false);
     }
   };
 
   const handleLogoutCourier = () => {
     setSelectedCourierId('');
+    setCourierFallback(null);
     setSelectedOrderId('');
     setFeedback(null);
+    setLoginError(null);
+    setPhoneInput('');
     try {
       localStorage.removeItem(COURIER_SESSION_KEY);
+      localStorage.removeItem(COURIER_PHONE_KEY);
     } catch {
       // Ignore storage failures
+    }
+  };
+
+  const handleCopySettlementReceipt = async (
+    settlementId: string,
+    text: string,
+  ) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedSettlementId(settlementId);
+      setTimeout(() => setCopiedSettlementId(null), 2000);
+    } catch {
+      // Ignore clipboard failures
     }
   };
 
@@ -470,9 +711,17 @@ export function CourierAppPage() {
   const unitFee = activeCourier
     ? activeCourier.feePerDelivery ?? state.store.deliveryFee
     : state.store.deliveryFee;
-  const estimatedTodayEarnings = activeCourier
+  const estimatedTodayFees = activeCourier
     ? activeCourier.deliveriesToday * unitFee
     : 0;
+  const estimatedTodayTotal = activeCourier
+    ? estimatedTodayFees + (activeCourier.fixedDailyPay ?? 0)
+    : 0;
+  const totalReceivedHistory = useMemo(
+    () =>
+      mySettlements.reduce((sum, item) => sum + (item.totalPaid || 0), 0),
+    [mySettlements],
+  );
 
   const visibleOrders =
     activeTab === 'minhas_entregas'
@@ -562,78 +811,80 @@ export function CourierAppPage() {
               className="min-h-[40px] inline-flex items-center gap-1.5 px-3 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-lg whitespace-nowrap"
             >
               <LogOut className="w-3.5 h-3.5" aria-hidden="true" />
-              <span className="hidden sm:inline">Trocar</span>
+              <span className="hidden sm:inline">Sair</span>
             </button>
           )}
         </div>
       </header>
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-5">
-        {/* COURIER SELECTION / LOGIN SCREEN */}
+        {/* COURIER WHATSAPP LOGIN SCREEN */}
         {!activeCourier ? (
-          <section className="max-w-2xl mx-auto py-6 sm:py-10 space-y-6">
-            <div className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 space-y-2">
-              <div className="w-11 h-11 rounded-xl bg-brand-50 dark:bg-brand-950/60 text-brand-600 dark:text-brand-400 flex items-center justify-center mb-3">
-                <Bike className="w-6 h-6" aria-hidden="true" />
+          <section className="max-w-md mx-auto py-6 sm:py-10">
+            <div className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-7 space-y-5">
+              <div className="space-y-1.5">
+                <div className="w-11 h-11 rounded-xl bg-brand-50 dark:bg-brand-950/60 border border-brand-200 dark:border-brand-800 text-brand-600 dark:text-brand-400 flex items-center justify-center mb-3">
+                  <Bike className="w-6 h-6" aria-hidden="true" />
+                </div>
+                <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
+                  Entrar no Painel do Motoboy
+                </h1>
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                  Digite o número do seu WhatsApp cadastrado pela gerência para
+                  visualizar suas entregas, abrir o GPS e consultar seus
+                  pagamentos.
+                </p>
               </div>
-              <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                Identifique-se para iniciar o turno
-              </h1>
-              <p className="text-sm text-slate-600 dark:text-slate-400">
-                Selecione seu perfil de entregador abaixo para visualizar suas entregas em aberto, abrir o trajeto GPS e dar baixa ao chegar no cliente.
-              </p>
-            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              {state.couriers.map((courier) => {
-                const pendingCount = state.orders.filter(
-                  (o) =>
-                    o.courierId === courier.id &&
-                    (o.status === 'entrega' || o.status === 'pronto'),
-                ).length;
+              {loginError && (
+                <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 flex items-start gap-2 text-xs text-red-700 dark:text-red-300">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{loginError}</span>
+                </div>
+              )}
 
-                return (
-                  <button
-                    key={courier.id}
-                    type="button"
-                    onClick={() => handleSelectCourier(courier.id)}
-                    className="min-h-[88px] text-left bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 hover:border-brand-500 dark:hover:border-brand-500 rounded-2xl p-5 transition-colors flex flex-col justify-between gap-3"
+              <form onSubmit={handleCourierPhoneLogin} className="space-y-4">
+                <div>
+                  <label
+                    htmlFor="courier-phone-login"
+                    className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5"
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-base font-bold text-slate-900 dark:text-white">
-                          {courier.name}
-                        </p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 font-mono-tabular mt-0.5">
-                          {courier.vehicle} · {courier.plate}
-                        </p>
-                      </div>
-                      <span
-                        className={`text-xs font-semibold ${
-                          courier.status === 'disponivel'
-                            ? 'text-emerald-700 dark:text-emerald-400'
-                            : courier.status === 'em_rota'
-                              ? 'text-brand-600 dark:text-brand-400'
-                              : 'text-slate-500'
-                        }`}
-                      >
-                        {COURIER_STATUS_LABEL[courier.status]}
-                      </span>
-                    </div>
+                    WhatsApp / Celular (DDD + Número)
+                  </label>
+                  <input
+                    id="courier-phone-login"
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    autoFocus
+                    value={phoneInput}
+                    onChange={(e) => {
+                      setPhoneInput(e.target.value);
+                      if (loginError) setLoginError(null);
+                    }}
+                    placeholder="(11) 97310-4482"
+                    className="w-full min-h-[48px] px-3.5 py-2.5 text-base font-mono-tabular bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
 
-                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
-                      <span className="text-slate-500 dark:text-slate-400 font-mono-tabular">
-                        {pendingCount > 0
-                          ? `${pendingCount} entrega(s) ativa(s)`
-                          : 'Sem pedidos em rota'}
-                      </span>
-                      <span className="font-semibold text-brand-600 dark:text-brand-400">
-                        Acessar →
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
+                <button
+                  type="submit"
+                  disabled={loggingIn}
+                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 disabled:opacity-60 rounded-xl transition-colors"
+                >
+                  <Phone className="w-4 h-4" aria-hidden="true" />
+                  <span>
+                    {loggingIn
+                      ? 'Validando WhatsApp...'
+                      : 'Entrar com WhatsApp'}
+                  </span>
+                </button>
+              </form>
+
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-800 pt-3">
+                Não conseguiu entrar? Peça à gerência para conferir seu número
+                de WhatsApp na aba Entregadores.
+              </p>
             </div>
           </section>
         ) : (
@@ -654,9 +905,13 @@ export function CourierAppPage() {
                     </span>
                   </div>
                   <p className="text-xs text-slate-600 dark:text-slate-400 font-mono-tabular mt-0.5">
-                    Hoje: <strong className="text-slate-900 dark:text-white">{activeCourier.deliveriesToday}</strong> entregas · Taxa est.:{' '}
+                    WhatsApp: {formatPhoneBR(activeCourier.phone)} · Hoje:{' '}
+                    <strong className="text-slate-900 dark:text-white">
+                      {activeCourier.deliveriesToday}
+                    </strong>{' '}
+                    entregas · Est. turno:{' '}
                     <strong className="text-emerald-700 dark:text-emerald-400">
-                      {formatCurrencyBRL(estimatedTodayEarnings)}
+                      {formatCurrencyBRL(estimatedTodayTotal)}
                     </strong>
                   </p>
                 </div>
@@ -707,8 +962,8 @@ export function CourierAppPage() {
             {/* TABS BAR (44px+ Touch Targets) */}
             <div
               role="tablist"
-              aria-label="Categorias de entregas"
-              className="grid grid-cols-3 gap-1.5 p-1.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl"
+              aria-label="Categorias do painel do motoboy"
+              className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1.5 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl"
             >
               {(
                 [
@@ -724,6 +979,10 @@ export function CourierAppPage() {
                     id: 'concluidas' as const,
                     label: `Entregues (${myCompletedOrders.length})`,
                   },
+                  {
+                    id: 'pagamentos' as const,
+                    label: `Pagamentos (${mySettlements.length})`,
+                  },
                 ] as const
               ).map((tab) => (
                 <button
@@ -732,7 +991,7 @@ export function CourierAppPage() {
                   role="tab"
                   aria-selected={activeTab === tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`min-h-[44px] px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-colors text-center ${
+                  className={`min-h-[44px] px-2 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-colors text-center whitespace-nowrap truncate ${
                     activeTab === tab.id
                       ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -743,8 +1002,216 @@ export function CourierAppPage() {
               ))}
             </div>
 
-            {/* MAIN CONTENT: ORDERS + INTEGRATED GPS MAP */}
-            {visibleOrders.length === 0 ? (
+            {/* MAIN CONTENT: PAYMENTS TAB OR ORDERS + INTEGRATED GPS MAP */}
+            {activeTab === 'pagamentos' ? (
+              <section className="space-y-5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                  <div className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5">
+                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                      Total Recebido no Histórico
+                    </p>
+                    <p className="text-2xl font-extrabold font-mono-tabular text-emerald-700 dark:text-emerald-400 mt-1">
+                      {formatCurrencyBRL(totalReceivedHistory)}
+                    </p>
+                    <p className="text-[11px] font-mono-tabular text-slate-500 mt-1">
+                      {mySettlements.length}{' '}
+                      {mySettlements.length === 1
+                        ? 'fechamento pago'
+                        : 'fechamentos pagos'}
+                    </p>
+                  </div>
+
+                  <div className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5">
+                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                      Estimativa do Turno Hoje
+                    </p>
+                    <p className="text-2xl font-extrabold font-mono-tabular text-slate-900 dark:text-white mt-1">
+                      {formatCurrencyBRL(estimatedTodayTotal)}
+                    </p>
+                    <p className="text-[11px] font-mono-tabular text-slate-500 mt-1">
+                      {activeCourier.deliveriesToday} entregas ({formatCurrencyBRL(estimatedTodayFees)})
+                      {(activeCourier.fixedDailyPay ?? 0) > 0
+                        ? ` + diária ${formatCurrencyBRL(activeCourier.fixedDailyPay ?? 0)}`
+                        : ''}
+                    </p>
+                  </div>
+
+                  <div className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5">
+                    <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                      Chave Pix e Taxa Padrão
+                    </p>
+                    <p className="text-sm font-bold font-mono-tabular text-slate-900 dark:text-white mt-1.5 truncate">
+                      {activeCourier.pixKey || 'Pix não cadastrado'}
+                    </p>
+                    <p className="text-[11px] font-mono-tabular text-slate-500 mt-1">
+                      {formatCurrencyBRL(unitFee)} / entrega · Diária{' '}
+                      {formatCurrencyBRL(activeCourier.fixedDailyPay ?? 0)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-2xl divide-y divide-slate-200 dark:divide-slate-800">
+                  <div className="p-4 sm:p-5 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Wallet
+                        className="w-4 h-4 text-brand-600 dark:text-brand-400"
+                        aria-hidden="true"
+                      />
+                      <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                        Histórico de Pagamentos e Fechamentos
+                      </h2>
+                    </div>
+                    <span className="text-xs font-mono-tabular text-slate-500">
+                      {mySettlements.length} registro(s)
+                    </span>
+                  </div>
+
+                  {mySettlements.length === 0 ? (
+                    <div className="p-8 text-center space-y-1.5">
+                      <Wallet
+                        className="w-7 h-7 mx-auto text-slate-400"
+                        aria-hidden="true"
+                      />
+                      <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                        Nenhum fechamento pago ainda
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                        Quando a gerência realizar o fechamento do seu turno, o
+                        comprovante e os valores aparecerão aqui automaticamente.
+                      </p>
+                    </div>
+                  ) : (
+                    mySettlements.map((settlement) => (
+                      <article
+                        key={settlement.id}
+                        className="p-4 sm:p-5 space-y-3"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div className="space-y-0.5">
+                            <p className="text-sm font-bold text-slate-900 dark:text-white font-mono-tabular">
+                              Fechamento {formatDateBRFromYMD(settlement.date)} ·{' '}
+                              <span className="text-emerald-700 dark:text-emerald-400">
+                                {formatCurrencyBRL(settlement.totalPaid)}
+                              </span>
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 font-mono-tabular">
+                              {settlement.deliveriesCount} entregas ·{' '}
+                              {settlement.paymentMethod}
+                              {settlement.pixKey
+                                ? ` · Pix: ${settlement.pixKey}`
+                                : ''}
+                              {settlement.createdAt
+                                ? ` · Emitido em ${formatDateTimeBR(settlement.createdAt)}`
+                                : ''}
+                            </p>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleCopySettlementReceipt(
+                                settlement.id,
+                                settlement.receiptText,
+                              )
+                            }
+                            className="min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl shrink-0"
+                          >
+                            {copiedSettlementId === settlement.id ? (
+                              <>
+                                <Check
+                                  className="w-3.5 h-3.5 text-emerald-600"
+                                  aria-hidden="true"
+                                />
+                                <span>Copiado</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                                <span>Copiar Comprovante</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono-tabular text-slate-600 dark:text-slate-300">
+                          <span>
+                            Taxas: {formatCurrencyBRL(settlement.deliveryFeesTotal)}
+                          </span>
+                          <span>
+                            Diária: {formatCurrencyBRL(settlement.fixedDailyPay)}
+                          </span>
+                          {settlement.bonusAmount > 0 && (
+                            <span className="text-emerald-700 dark:text-emerald-400">
+                              Bônus: +{formatCurrencyBRL(settlement.bonusAmount)}
+                            </span>
+                          )}
+                          {settlement.discountAmount > 0 && (
+                            <span className="text-red-700 dark:text-red-400">
+                              Descontos: -{formatCurrencyBRL(settlement.discountAmount)}
+                            </span>
+                          )}
+                        </div>
+
+                        {settlement.notes && (
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Obs.: {settlement.notes}
+                          </p>
+                        )}
+
+                        <pre className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px] leading-relaxed text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-sans">
+                          {settlement.receiptText}
+                        </pre>
+                      </article>
+                    ))
+                  )}
+                </div>
+
+                {matchedEmployeeLedger.length > 0 && (
+                  <div className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-2xl divide-y divide-slate-200 dark:divide-slate-800">
+                    <div className="p-4 sm:p-5 flex items-center justify-between gap-2">
+                      <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+                        Vales e Lançamentos em Folha
+                      </h2>
+                      <span className="text-xs font-mono-tabular text-slate-500">
+                        {matchedEmployeeLedger.length} registro(s)
+                      </span>
+                    </div>
+                    {matchedEmployeeLedger.map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="p-4 sm:px-5 flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="min-w-0 space-y-0.5">
+                          <p className="font-semibold text-slate-900 dark:text-white">
+                            {LEDGER_TYPE_LABEL[entry.type]} · {entry.description}
+                          </p>
+                          <p className="text-slate-500 font-mono-tabular">
+                            {formatDateBRFromYMD(entry.date)}
+                            {entry.paymentMethod
+                              ? ` · ${entry.paymentMethod}`
+                              : ''}
+                            {entry.settled ? ' · Quitada na folha' : ''}
+                          </p>
+                        </div>
+                        <span
+                          className={`font-mono-tabular font-bold shrink-0 ${
+                            entry.type === 'pagamento' ||
+                            entry.type === 'bonus'
+                              ? 'text-emerald-700 dark:text-emerald-400'
+                              : 'text-amber-700 dark:text-amber-400'
+                          }`}
+                        >
+                          {entry.type === 'pagamento' || entry.type === 'bonus'
+                            ? '+ '
+                            : '- '}
+                          {formatCurrencyBRL(entry.amount)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            ) : visibleOrders.length === 0 ? (
               <div className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-2xl p-10 text-center space-y-2">
                 <Package className="w-8 h-8 mx-auto text-slate-400" aria-hidden="true" />
                 <p className="text-base font-bold text-slate-900 dark:text-white">

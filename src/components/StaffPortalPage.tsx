@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
   AlertTriangle,
+  ArrowDownRight,
   ArrowLeft,
   Check,
   CheckCircle2,
@@ -11,10 +12,13 @@ import {
   Clock,
   LogOut,
   Moon,
+  Package,
   Phone,
   RefreshCw,
   Sun,
+  Trash2,
   UserCheck,
+  Utensils,
   Wallet,
 } from 'lucide-react';
 import { INITIAL_DELIVERY_STATE } from '@/lib/delivery-seed';
@@ -31,6 +35,7 @@ import {
   LEDGER_TYPE_LABEL,
   TASK_PRIORITY_LABEL,
   TASK_STATUS_LABEL,
+  WASTE_REASON_LABEL,
   formatCurrencyBRL,
   formatDateTimeBR,
   formatTimeBR,
@@ -39,6 +44,12 @@ import {
   computeEmployeePayroll,
   formatDateBRFromYMD,
 } from '@/lib/staff-engine';
+import {
+  applyWasteStockDeduction,
+  formatStockQty,
+  getCompatibleUnits,
+  previewWasteDeduction,
+} from '@/lib/stock-engine';
 import type {
   ChecklistRole,
   ChecklistRun,
@@ -46,8 +57,15 @@ import type {
   DeliveryStoreState,
   Employee,
   EmployeeLedgerEntry,
+  MenuItem,
   StaffTask,
   StaffTaskStatus,
+  StockIngredient,
+  StockMovement,
+  StockUnit,
+  WasteLog,
+  WasteReason,
+  WasteTargetType,
 } from '@/types/delivery';
 
 const STORAGE_KEY = 'casa-tempero-delivery-v1';
@@ -70,6 +88,17 @@ function hydrateState(parsed: DeliveryStoreState): DeliveryStoreState {
     checklistRuns: Array.isArray(parsed.checklistRuns)
       ? parsed.checklistRuns
       : INITIAL_DELIVERY_STATE.checklistRuns,
+    ingredients:
+      Array.isArray(parsed.ingredients) && parsed.ingredients.length > 0
+        ? parsed.ingredients
+        : INITIAL_DELIVERY_STATE.ingredients,
+    menuItems:
+      Array.isArray(parsed.menuItems) && parsed.menuItems.length > 0
+        ? parsed.menuItems
+        : INITIAL_DELIVERY_STATE.menuItems,
+    stockMovements: Array.isArray(parsed.stockMovements)
+      ? parsed.stockMovements
+      : INITIAL_DELIVERY_STATE.stockMovements,
     wasteLogs: Array.isArray(parsed.wasteLogs)
       ? parsed.wasteLogs
       : INITIAL_DELIVERY_STATE.wasteLogs,
@@ -94,7 +123,16 @@ const ROLE_FILTERS: Array<'todos' | ChecklistRole> = [
   'gerencia',
 ];
 
-type PortalTab = 'checklists' | 'financeiro';
+const WASTE_REASON_OPTIONS: WasteReason[] = [
+  'vencimento',
+  'erro_preparo',
+  'sobra_buffet',
+  'avaria_embalagem',
+  'qualidade',
+  'outros',
+];
+
+type PortalTab = 'checklists' | 'desperdicios' | 'financeiro';
 
 export function StaffPortalPage() {
   const [state, setState] = useState<DeliveryStoreState>(INITIAL_DELIVERY_STATE);
@@ -114,6 +152,21 @@ export function StaffPortalPage() {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [logoFailed, setLogoFailed] = useState(false);
 
+  // Waste form state
+  const [wasteTargetType, setWasteTargetType] =
+    useState<WasteTargetType>('insumo');
+  const [wasteTargetId, setWasteTargetId] = useState<string>(
+    INITIAL_DELIVERY_STATE.ingredients[0]?.id ?? '',
+  );
+  const [wasteQtyStr, setWasteQtyStr] = useState('0.5');
+  const [wasteUnit, setWasteUnit] = useState<StockUnit>(
+    INITIAL_DELIVERY_STATE.ingredients[0]?.unit ?? 'kg',
+  );
+  const [wasteReason, setWasteReason] = useState<WasteReason>('vencimento');
+  const [wasteNotes, setWasteNotes] = useState('');
+  const [wasteConfirming, setWasteConfirming] = useState(false);
+  const [submittingWaste, setSubmittingWaste] = useState(false);
+
   const verifySavedSessionWithServer = useCallback(async (phone: string) => {
     try {
       const res = await fetch('/api/staff', {
@@ -129,6 +182,10 @@ export function StaffPortalPage() {
         employeeLedger?: EmployeeLedgerEntry[];
         checklistTemplates?: ChecklistTemplate[];
         checklistRuns?: ChecklistRun[];
+        ingredients?: StockIngredient[];
+        menuItems?: MenuItem[];
+        stockMovements?: StockMovement[];
+        wasteLogs?: WasteLog[];
       };
       if (data.ok && data.employee) {
         setLoggedEmployeeFallback(data.employee);
@@ -145,6 +202,10 @@ export function StaffPortalPage() {
           checklistTemplates:
             data.checklistTemplates ?? prev.checklistTemplates,
           checklistRuns: data.checklistRuns ?? prev.checklistRuns,
+          ingredients: data.ingredients ?? prev.ingredients,
+          menuItems: data.menuItems ?? prev.menuItems,
+          stockMovements: data.stockMovements ?? prev.stockMovements,
+          wasteLogs: data.wasteLogs ?? prev.wasteLogs,
         }));
       }
     } catch {
@@ -285,6 +346,10 @@ export function StaffPortalPage() {
         employeeLedger?: EmployeeLedgerEntry[];
         checklistTemplates?: ChecklistTemplate[];
         checklistRuns?: ChecklistRun[];
+        ingredients?: StockIngredient[];
+        menuItems?: MenuItem[];
+        stockMovements?: StockMovement[];
+        wasteLogs?: WasteLog[];
       };
 
       if (!res.ok || !data.ok || !data.employee) {
@@ -310,6 +375,10 @@ export function StaffPortalPage() {
         employeeLedger: data.employeeLedger ?? prev.employeeLedger,
         checklistTemplates: data.checklistTemplates ?? prev.checklistTemplates,
         checklistRuns: data.checklistRuns ?? prev.checklistRuns,
+        ingredients: data.ingredients ?? prev.ingredients,
+        menuItems: data.menuItems ?? prev.menuItems,
+        stockMovements: data.stockMovements ?? prev.stockMovements,
+        wasteLogs: data.wasteLogs ?? prev.wasteLogs,
       }));
       try {
         localStorage.setItem(STAFF_ID_KEY, found.id);
@@ -462,6 +531,150 @@ export function StaffPortalPage() {
     if (!loggedEmployee) return null;
     return computeEmployeePayroll(loggedEmployee, state.employeeLedger ?? []);
   }, [loggedEmployee, state.employeeLedger]);
+
+  const selectedWasteIngredient = useMemo(
+    () =>
+      wasteTargetType === 'insumo'
+        ? state.ingredients.find((i) => i.id === wasteTargetId)
+        : undefined,
+    [wasteTargetType, wasteTargetId, state.ingredients],
+  );
+
+  const wasteCompatibleUnits = useMemo<StockUnit[]>(() => {
+    if (!selectedWasteIngredient) return ['un'];
+    return getCompatibleUnits(selectedWasteIngredient.unit);
+  }, [selectedWasteIngredient]);
+
+  const parsedWasteQty = Number(wasteQtyStr.replace(',', '.'));
+
+  const wasteDeductionPreview = useMemo(
+    () =>
+      previewWasteDeduction({
+        targetType: wasteTargetType,
+        targetId: wasteTargetId,
+        quantity: Number.isFinite(parsedWasteQty) ? parsedWasteQty : 0,
+        unit: wasteTargetType === 'insumo' ? wasteUnit : undefined,
+        menuItems: state.menuItems,
+        ingredients: state.ingredients,
+      }),
+    [
+      wasteTargetType,
+      wasteTargetId,
+      parsedWasteQty,
+      wasteUnit,
+      state.menuItems,
+      state.ingredients,
+    ],
+  );
+
+  const canSubmitWaste =
+    Boolean(loggedEmployee) &&
+    Boolean(wasteTargetId) &&
+    Number.isFinite(parsedWasteQty) &&
+    parsedWasteQty > 0;
+
+  const handleWasteTargetTypeSwitch = (next: WasteTargetType) => {
+    setWasteTargetType(next);
+    setWasteConfirming(false);
+    if (next === 'insumo') {
+      const firstIng = state.ingredients[0];
+      setWasteTargetId(firstIng?.id ?? '');
+      setWasteUnit(firstIng?.unit ?? 'kg');
+      setWasteQtyStr('0.5');
+    } else {
+      const firstDish =
+        state.menuItems.find((m) => (m.technicalSheet?.length ?? 0) > 0) ??
+        state.menuItems[0];
+      setWasteTargetId(firstDish?.id ?? '');
+      setWasteQtyStr('1');
+    }
+  };
+
+  const handleConfirmWaste = async () => {
+    if (!canSubmitWaste || !loggedEmployee || submittingWaste) return;
+    setSubmittingWaste(true);
+    const result = applyWasteStockDeduction({
+      targetType: wasteTargetType,
+      targetId: wasteTargetId,
+      quantity: parsedWasteQty,
+      unit: wasteTargetType === 'insumo' ? wasteUnit : undefined,
+      reason: wasteReason,
+      employeeName: loggedEmployee.name,
+      notes: wasteNotes.trim() || undefined,
+      menuItems: state.menuItems,
+      ingredients: state.ingredients,
+    });
+
+    setState((prev) => {
+      const next: DeliveryStoreState = {
+        ...prev,
+        ingredients: result.ingredients,
+        stockMovements:
+          result.newMovements.length > 0
+            ? [...result.newMovements, ...prev.stockMovements]
+            : prev.stockMovements,
+        wasteLogs: [result.wasteLog, ...(prev.wasteLogs ?? [])],
+      };
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+
+    try {
+      const res = await fetch('/api/waste', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetType: wasteTargetType,
+          targetId: wasteTargetId,
+          quantity: parsedWasteQty,
+          unit: wasteTargetType === 'insumo' ? wasteUnit : undefined,
+          reason: wasteReason,
+          employeeName: loggedEmployee.name,
+          notes: wasteNotes.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        const apiData = (await res.json()) as {
+          ok?: boolean;
+          ingredients?: StockIngredient[];
+          stockMovements?: StockMovement[];
+          wasteLogs?: WasteLog[];
+        };
+        if (apiData.ok) {
+          setState((prev) => {
+            const synced: DeliveryStoreState = {
+              ...prev,
+              ingredients: apiData.ingredients ?? prev.ingredients,
+              stockMovements: apiData.stockMovements ?? prev.stockMovements,
+              wasteLogs: apiData.wasteLogs ?? prev.wasteLogs,
+            };
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(synced));
+            } catch {
+              // ignore
+            }
+            return synced;
+          });
+        }
+      }
+    } catch {
+      // local state already updated
+    } finally {
+      setSubmittingWaste(false);
+    }
+
+    setWasteConfirming(false);
+    setWasteNotes('');
+    setFeedback(
+      `Descarte de "${result.wasteLog.targetName}" lançado e baixado do estoque (${formatCurrencyBRL(
+        result.wasteLog.estimatedCost,
+      )}).`,
+    );
+  };
 
   const handleStartChecklist = (tpl: ChecklistTemplate) => {
     if (!loggedEmployee) return;
@@ -854,11 +1067,11 @@ export function StaffPortalPage() {
             ) : (
               <>
                 {/* Employee Panel Tabs */}
-                <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
+                <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3">
                   <button
                     type="button"
                     onClick={() => setPortalTab('checklists')}
-                    className={`min-h-[40px] inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg border transition-colors ${
+                    className={`min-h-[42px] inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
                       portalTab === 'checklists'
                         ? 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900 dark:border-white'
                         : 'bg-white dark:bg-[#13151c] text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800'
@@ -869,8 +1082,20 @@ export function StaffPortalPage() {
                   </button>
                   <button
                     type="button"
+                    onClick={() => setPortalTab('desperdicios')}
+                    className={`min-h-[42px] inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
+                      portalTab === 'desperdicios'
+                        ? 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900 dark:border-white'
+                        : 'bg-white dark:bg-[#13151c] text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800'
+                    }`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Desperdícios (Baixa Estoque)</span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setPortalTab('financeiro')}
-                    className={`min-h-[40px] inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-lg border transition-colors ${
+                    className={`min-h-[42px] inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
                       portalTab === 'financeiro'
                         ? 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900 dark:border-white'
                         : 'bg-white dark:bg-[#13151c] text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800'
@@ -1094,6 +1319,350 @@ export function StaffPortalPage() {
                       </section>
                     )}
                   </>
+                ) : portalTab === 'desperdicios' ? (
+                  <section className="space-y-5">
+                    <div className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-6 space-y-5">
+                      <div>
+                        <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                          Lançar Desperdício / Baixa do Estoque
+                        </h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                          Registre insumos descartados ou pratos prontos perdidos
+                          para dar baixa automática no estoque em nome de{' '}
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">
+                            {loggedEmployee.name}
+                          </span>
+                          .
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => handleWasteTargetTypeSwitch('insumo')}
+                          className={`min-h-[48px] inline-flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-semibold rounded-xl border transition-colors ${
+                            wasteTargetType === 'insumo'
+                              ? 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900 dark:border-white'
+                              : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'
+                          }`}
+                        >
+                          <Package className="w-4 h-4" />
+                          <span>Insumo / Ingrediente</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleWasteTargetTypeSwitch('prato')}
+                          className={`min-h-[48px] inline-flex items-center justify-center gap-2 px-3 py-2.5 text-sm font-semibold rounded-xl border transition-colors ${
+                            wasteTargetType === 'prato'
+                              ? 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900 dark:border-white'
+                              : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'
+                          }`}
+                        >
+                          <Utensils className="w-4 h-4" />
+                          <span>Prato / Marmita</span>
+                        </button>
+                      </div>
+
+                      {wasteTargetType === 'insumo' ? (
+                        <div>
+                          <label
+                            htmlFor="staff-waste-ingredient"
+                            className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
+                          >
+                            Qual insumo foi descartado?
+                          </label>
+                          <select
+                            id="staff-waste-ingredient"
+                            value={wasteTargetId}
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              setWasteTargetId(id);
+                              setWasteConfirming(false);
+                              const found = state.ingredients.find(
+                                (i) => i.id === id,
+                              );
+                              if (found) setWasteUnit(found.unit);
+                            }}
+                            className="w-full min-h-[46px] px-3 py-2.5 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl"
+                          >
+                            {state.ingredients.map((ing) => (
+                              <option key={ing.id} value={ing.id}>
+                                {ing.name} — Saldo:{' '}
+                                {formatStockQty(ing.currentQty, ing.unit)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : (
+                        <div>
+                          <label
+                            htmlFor="staff-waste-dish"
+                            className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
+                          >
+                            Qual prato / marmita pronta foi descartada?
+                          </label>
+                          <select
+                            id="staff-waste-dish"
+                            value={wasteTargetId}
+                            onChange={(e) => {
+                              setWasteTargetId(e.target.value);
+                              setWasteConfirming(false);
+                            }}
+                            className="w-full min-h-[46px] px-3 py-2.5 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl"
+                          >
+                            {state.menuItems.map((item) => (
+                              <option key={item.id} value={item.id}>
+                                {item.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label
+                            htmlFor="staff-waste-qty"
+                            className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
+                          >
+                            {wasteTargetType === 'insumo'
+                              ? 'Quantidade'
+                              : 'Qtd. de Porções'}
+                          </label>
+                          <input
+                            id="staff-waste-qty"
+                            type="number"
+                            step="any"
+                            min="0.01"
+                            value={wasteQtyStr}
+                            onChange={(e) => {
+                              setWasteQtyStr(e.target.value);
+                              setWasteConfirming(false);
+                            }}
+                            className="w-full min-h-[46px] px-3 py-2.5 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl"
+                          />
+                        </div>
+
+                        {wasteTargetType === 'insumo' ? (
+                          <div>
+                            <label
+                              htmlFor="staff-waste-unit"
+                              className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
+                            >
+                              Unidade
+                            </label>
+                            <select
+                              id="staff-waste-unit"
+                              value={wasteUnit}
+                              onChange={(e) => {
+                                setWasteUnit(e.target.value as StockUnit);
+                                setWasteConfirming(false);
+                              }}
+                              className="w-full min-h-[46px] px-3 py-2.5 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl"
+                            >
+                              {wasteCompatibleUnits.map((u) => (
+                                <option key={u} value={u}>
+                                  {u}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : (
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                              Baixa Automática
+                            </label>
+                            <input
+                              readOnly
+                              value="Por Ficha Técnica"
+                              className="w-full min-h-[46px] px-3 py-2.5 text-sm bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-500"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="staff-waste-reason"
+                          className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
+                        >
+                          Motivo do Descarte
+                        </label>
+                        <select
+                          id="staff-waste-reason"
+                          value={wasteReason}
+                          onChange={(e) =>
+                            setWasteReason(e.target.value as WasteReason)
+                          }
+                          className="w-full min-h-[46px] px-3 py-2.5 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl"
+                        >
+                          {WASTE_REASON_OPTIONS.map((r) => (
+                            <option key={r} value={r}>
+                              {WASTE_REASON_LABEL[r]}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="staff-waste-notes"
+                          className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
+                        >
+                          Observação (opcional)
+                        </label>
+                        <input
+                          id="staff-waste-notes"
+                          type="text"
+                          value={wasteNotes}
+                          onChange={(e) => setWasteNotes(e.target.value)}
+                          placeholder="Ex.: Queimou na chapa / lote fora da validade"
+                          className="w-full min-h-[46px] px-3 py-2.5 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl"
+                        />
+                      </div>
+
+                      <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between text-xs sm:text-sm">
+                          <span className="font-semibold text-slate-700 dark:text-slate-200">
+                            Será baixado do estoque:
+                          </span>
+                          <span className="font-mono-tabular font-bold text-red-700 dark:text-red-400">
+                            {formatCurrencyBRL(
+                              wasteDeductionPreview.estimatedCost,
+                            )}
+                          </span>
+                        </div>
+
+                        {wasteDeductionPreview.affectedIngredients.length ===
+                        0 ? (
+                          <p className="text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                            <AlertTriangle className="w-4 h-4 shrink-0" />
+                            <span>
+                              {wasteTargetType === 'prato'
+                                ? 'Prato sem ficha técnica configurada — o registro ficará salvo no histórico.'
+                                : 'Informe uma quantidade válida para calcular a baixa.'}
+                            </span>
+                          </p>
+                        ) : (
+                          <ul className="space-y-1.5 text-xs">
+                            {wasteDeductionPreview.affectedIngredients.map(
+                              (item) => (
+                                <li
+                                  key={item.ingredientId}
+                                  className="flex items-center justify-between gap-2 text-slate-700 dark:text-slate-300"
+                                >
+                                  <span>{item.ingredientName}</span>
+                                  <span className="font-mono-tabular font-bold text-red-700 dark:text-red-400">
+                                    -{formatStockQty(item.quantity, item.unit)}
+                                  </span>
+                                </li>
+                              ),
+                            )}
+                          </ul>
+                        )}
+                      </div>
+
+                      {wasteConfirming ? (
+                        <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 space-y-3">
+                          <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                            Confirmar descarte e dar baixa automática no
+                            estoque?
+                          </p>
+                          <div className="grid grid-cols-2 gap-2.5">
+                            <button
+                              type="button"
+                              onClick={() => setWasteConfirming(false)}
+                              className="min-h-[46px] px-4 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              disabled={submittingWaste}
+                              onClick={handleConfirmWaste}
+                              className="min-h-[46px] px-4 py-2.5 text-sm font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-60 rounded-xl"
+                            >
+                              {submittingWaste
+                                ? 'Registrando...'
+                                : 'Confirmar Baixa'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={!canSubmitWaste}
+                          onClick={() => setWasteConfirming(true)}
+                          className="w-full min-h-[50px] inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-bold text-white bg-brand-600 hover:bg-brand-700 disabled:opacity-50 rounded-xl transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          <span>Lançar Desperdício e Dar Baixa</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl divide-y divide-slate-200 dark:divide-slate-800">
+                      <div className="p-4 flex items-center justify-between gap-2">
+                        <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                          Histórico de Desperdícios ({(state.wasteLogs ?? []).length})
+                        </h3>
+                        <span className="text-xs font-mono-tabular font-semibold text-red-700 dark:text-red-400">
+                          {formatCurrencyBRL(
+                            (state.wasteLogs ?? []).reduce(
+                              (s, w) => s + w.estimatedCost,
+                              0,
+                            ),
+                          )}
+                        </span>
+                      </div>
+                      {(state.wasteLogs ?? []).length === 0 ? (
+                        <div className="p-6 text-center text-xs text-slate-500">
+                          Nenhum descarte lançado ainda.
+                        </div>
+                      ) : (
+                        (state.wasteLogs ?? []).slice(0, 12).map((log) => (
+                          <div key={log.id} className="p-4 space-y-1.5">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-xs font-mono-tabular text-slate-500">
+                                  {formatDateTimeBR(log.createdAt)} ·{' '}
+                                  {log.employeeName}
+                                </p>
+                                <h4 className="text-sm font-bold text-slate-900 dark:text-white">
+                                  {log.targetName} (
+                                  <span className="font-mono-tabular">
+                                    {log.quantity} {log.unitLabel}
+                                  </span>
+                                  )
+                                </h4>
+                              </div>
+                              <span className="text-sm font-mono-tabular font-bold text-red-700 dark:text-red-400 shrink-0">
+                                {formatCurrencyBRL(log.estimatedCost)}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-600 dark:text-slate-300">
+                              Motivo: {WASTE_REASON_LABEL[log.reason]}
+                              {log.notes ? ` · ${log.notes}` : ''}
+                            </p>
+                            {log.affectedIngredients.length > 0 && (
+                              <div className="flex flex-wrap gap-2 pt-0.5">
+                                {log.affectedIngredients.map((aff) => (
+                                  <span
+                                    key={aff.ingredientId}
+                                    className="inline-flex items-center gap-1 text-[11px] font-mono-tabular text-red-700 dark:text-red-400"
+                                  >
+                                    <ArrowDownRight className="w-3 h-3" />
+                                    {formatStockQty(aff.quantity, aff.unit)}{' '}
+                                    {aff.ingredientName}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </section>
                 ) : (
                   <section className="space-y-4">
                     {myPayroll && (

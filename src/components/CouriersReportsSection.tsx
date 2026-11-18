@@ -609,7 +609,8 @@ export function CouriersReportsSection({
                   Portal Exclusivo do Motoboy com GPS e Rotas
                 </p>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Envie este link para seus entregadores acessarem os pedidos da rota pelo celular e darem baixa na entrega.
+                  Envie este link para seus entregadores entrarem pelo WhatsApp,
+                  verem os pedidos da rota no GPS, darem baixa e consultarem pagamentos.
                 </p>
               </div>
             </div>
