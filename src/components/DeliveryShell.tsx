@@ -18,6 +18,7 @@ import {
   Sun,
   Tags,
   Trash2,
+  Users,
   UtensilsCrossed,
   Wallet,
   X,
@@ -28,11 +29,13 @@ import {
   applyWasteStockDeduction,
   reverseOrderStockDeduction,
 } from '@/lib/stock-engine';
+import { upsertCustomerAndAwardOrderPoints } from '@/lib/crm-engine';
 import { getCurrentMonthKey } from '@/lib/finance-engine';
 import { getStoreAvailability } from '@/lib/store-hours';
 import { DigitalMenuSection } from '@/components/DigitalMenuSection';
 import { OrdersManagerSection } from '@/components/OrdersManagerSection';
 import { WhatsappEvolutionSection } from '@/components/WhatsappEvolutionSection';
+import { CrmLoyaltySection } from '@/components/CrmLoyaltySection';
 import { CatalogCouponsSection } from '@/components/CatalogCouponsSection';
 import { StockTechnicalSheetSection } from '@/components/StockTechnicalSheetSection';
 import { CouriersReportsSection } from '@/components/CouriersReportsSection';
@@ -53,10 +56,15 @@ import type {
   Coupon,
   Courier,
   CourierSettlement,
+  CrmCustomer,
   DeliveryModuleId,
   DeliveryStoreState,
   EvolutionConfig,
   FinancialEntry,
+  LoyaltyProgramConfig,
+  LoyaltyPromotion,
+  LoyaltyReward,
+  LoyaltyTransaction,
   MenuCategory,
   MenuItem,
   Order,
@@ -86,6 +94,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'pedidos', label: 'Pedidos', icon: ClipboardList },
       { id: 'atendimento', label: 'Atendimento IA', icon: MessageSquare },
+      { id: 'clientes', label: 'CRM & Fidelidade', icon: Users },
       { id: 'entregadores', label: 'Entregadores', icon: Bike },
       { id: 'checklists', label: 'Checklists Equipe', icon: ListChecks },
       { id: 'desperdicios', label: 'Desperdícios', icon: Trash2 },
@@ -115,6 +124,8 @@ export function DeliveryShell() {
   const [activeModule, setActiveModule] =
     useState<DeliveryModuleId>('pedidos');
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>('loja');
+  const [preselectedOrderCustomer, setPreselectedOrderCustomer] =
+    useState<CrmCustomer | null>(null);
   const [isDark, setIsDark] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [origin, setOrigin] = useState('');
@@ -198,6 +209,25 @@ export function DeliveryShell() {
               wasteLogs: Array.isArray(parsed.wasteLogs)
                 ? parsed.wasteLogs
                 : INITIAL_DELIVERY_STATE.wasteLogs,
+              customers: Array.isArray(parsed.customers)
+                ? parsed.customers
+                : INITIAL_DELIVERY_STATE.customers,
+              loyaltyConfig:
+                parsed.loyaltyConfig && typeof parsed.loyaltyConfig === 'object'
+                  ? {
+                      ...INITIAL_DELIVERY_STATE.loyaltyConfig,
+                      ...parsed.loyaltyConfig,
+                    }
+                  : INITIAL_DELIVERY_STATE.loyaltyConfig,
+              loyaltyPromotions: Array.isArray(parsed.loyaltyPromotions)
+                ? parsed.loyaltyPromotions
+                : INITIAL_DELIVERY_STATE.loyaltyPromotions,
+              loyaltyRewards: Array.isArray(parsed.loyaltyRewards)
+                ? parsed.loyaltyRewards
+                : INITIAL_DELIVERY_STATE.loyaltyRewards,
+              loyaltyTransactions: Array.isArray(parsed.loyaltyTransactions)
+                ? parsed.loyaltyTransactions
+                : INITIAL_DELIVERY_STATE.loyaltyTransactions,
             });
             return;
           }
@@ -232,6 +262,25 @@ export function DeliveryShell() {
             wasteLogs: Array.isArray(parsed.wasteLogs)
               ? parsed.wasteLogs
               : INITIAL_DELIVERY_STATE.wasteLogs,
+            customers: Array.isArray(parsed.customers)
+              ? parsed.customers
+              : INITIAL_DELIVERY_STATE.customers,
+            loyaltyConfig:
+              parsed.loyaltyConfig && typeof parsed.loyaltyConfig === 'object'
+                ? {
+                    ...INITIAL_DELIVERY_STATE.loyaltyConfig,
+                    ...parsed.loyaltyConfig,
+                  }
+                : INITIAL_DELIVERY_STATE.loyaltyConfig,
+            loyaltyPromotions: Array.isArray(parsed.loyaltyPromotions)
+              ? parsed.loyaltyPromotions
+              : INITIAL_DELIVERY_STATE.loyaltyPromotions,
+            loyaltyRewards: Array.isArray(parsed.loyaltyRewards)
+              ? parsed.loyaltyRewards
+              : INITIAL_DELIVERY_STATE.loyaltyRewards,
+            loyaltyTransactions: Array.isArray(parsed.loyaltyTransactions)
+              ? parsed.loyaltyTransactions
+              : INITIAL_DELIVERY_STATE.loyaltyTransactions,
           });
         }
       } catch {
@@ -342,6 +391,35 @@ export function DeliveryShell() {
         }
       }
 
+      let nextCustomers = prev.customers ?? [];
+      let nextRewards = prev.loyaltyRewards ?? [];
+      let nextTransactions = prev.loyaltyTransactions ?? [];
+
+      if (sideEffects?.customers) {
+        nextCustomers = sideEffects.customers;
+        if (sideEffects.loyaltyRewards) nextRewards = sideEffects.loyaltyRewards;
+        if (sideEffects.loyaltyTransactions) {
+          nextTransactions = sideEffects.loyaltyTransactions;
+        }
+      } else {
+        const crmSync = upsertCustomerAndAwardOrderPoints({
+          customers: nextCustomers,
+          loyaltyConfig: prev.loyaltyConfig,
+          loyaltyPromotions: prev.loyaltyPromotions ?? [],
+          loyaltyRewards: nextRewards,
+          loyaltyTransactions: nextTransactions,
+          order: orderToStore,
+          autoCreate: true,
+          redeemedRewardId: orderToStore.loyaltyRewardId,
+        });
+        nextCustomers = crmSync.customers;
+        nextRewards = crmSync.loyaltyRewards;
+        nextTransactions = crmSync.loyaltyTransactions;
+        if (crmSync.customer && !orderToStore.customerId) {
+          orderToStore = { ...orderToStore, customerId: crmSync.customer.id };
+        }
+      }
+
       return {
         ...prev,
         orders: [orderToStore, ...prev.orders],
@@ -357,6 +435,9 @@ export function DeliveryShell() {
           : prev.whatsappLogs,
         ingredients: nextIngredients,
         stockMovements: nextMovements,
+        customers: nextCustomers,
+        loyaltyRewards: nextRewards,
+        loyaltyTransactions: nextTransactions,
       };
     });
   };
@@ -894,6 +975,240 @@ export function DeliveryShell() {
     }).catch(() => {});
   };
 
+  const handleUpsertCustomer = async (customer: CrmCustomer) => {
+    persistState((prev) => {
+      const list = prev.customers ?? [];
+      const exists = list.some((c) => c.id === customer.id);
+      return {
+        ...prev,
+        customers: exists
+          ? list.map((c) => (c.id === customer.id ? customer : c))
+          : [customer, ...list],
+      };
+    });
+    await fetch('/api/crm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'upsert_customer', customer }),
+    }).catch(() => {});
+  };
+
+  const handleDeleteCustomer = async (customerId: string) => {
+    persistState((prev) => ({
+      ...prev,
+      customers: (prev.customers ?? []).filter((c) => c.id !== customerId),
+    }));
+    await fetch(
+      `/api/crm?entity=customer&id=${encodeURIComponent(customerId)}`,
+      { method: 'DELETE' },
+    ).catch(() => {});
+  };
+
+  const handleAdjustPoints = async (
+    customerId: string,
+    pointsDelta: number,
+    reason: string,
+  ) => {
+    const now = new Date().toISOString();
+    persistState((prev) => {
+      const target = (prev.customers ?? []).find((c) => c.id === customerId);
+      if (!target) return prev;
+      const nextBalance = Math.max(0, target.pointsBalance + pointsDelta);
+      const tx: LoyaltyTransaction = {
+        id: `ltx-adj-${Date.now()}`,
+        customerId: target.id,
+        customerName: target.name,
+        type: 'ajuste_manual',
+        pointsDelta,
+        description: reason,
+        createdAt: now,
+      };
+      return {
+        ...prev,
+        customers: (prev.customers ?? []).map((c) =>
+          c.id === customerId
+            ? {
+                ...c,
+                pointsBalance: nextBalance,
+                totalPointsEarned:
+                  pointsDelta > 0
+                    ? c.totalPointsEarned + pointsDelta
+                    : c.totalPointsEarned,
+                updatedAt: now,
+              }
+            : c,
+        ),
+        loyaltyTransactions: [tx, ...(prev.loyaltyTransactions ?? [])],
+      };
+    });
+    await fetch('/api/crm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'adjust_points',
+        customerId,
+        pointsDelta,
+        reason,
+      }),
+    }).catch(() => {});
+  };
+
+  const handleRedeemReward = async (customerId: string, rewardId: string) => {
+    const now = new Date().toISOString();
+    persistState((prev) => {
+      const customer = (prev.customers ?? []).find((c) => c.id === customerId);
+      const reward = (prev.loyaltyRewards ?? []).find((r) => r.id === rewardId);
+      if (!customer || !reward || customer.pointsBalance < reward.pointsCost) {
+        return prev;
+      }
+      const tx: LoyaltyTransaction = {
+        id: `ltx-red-${Date.now()}`,
+        customerId: customer.id,
+        customerName: customer.name,
+        type: 'resgate_premio',
+        pointsDelta: -reward.pointsCost,
+        description: `Prêmio resgatado: ${reward.title}`,
+        rewardId: reward.id,
+        createdAt: now,
+      };
+      return {
+        ...prev,
+        customers: (prev.customers ?? []).map((c) =>
+          c.id === customerId
+            ? {
+                ...c,
+                pointsBalance: c.pointsBalance - reward.pointsCost,
+                totalRedeemed: c.totalRedeemed + reward.pointsCost,
+                updatedAt: now,
+              }
+            : c,
+        ),
+        loyaltyRewards: (prev.loyaltyRewards ?? []).map((r) =>
+          r.id === rewardId
+            ? { ...r, redemptionsCount: r.redemptionsCount + 1 }
+            : r,
+        ),
+        loyaltyTransactions: [tx, ...(prev.loyaltyTransactions ?? [])],
+      };
+    });
+    await fetch('/api/crm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'redeem_reward', customerId, rewardId }),
+    }).catch(() => {});
+  };
+
+  const handleSendRewardOffer = async (
+    customerId: string,
+    rewardId: string,
+    customMessage?: string,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const res = await fetch('/api/crm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'send_reward_offer',
+          customerId,
+          rewardId,
+          customMessage,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        log?: WhatsappLog;
+        error?: string;
+      };
+      if (data.ok && data.log) {
+        handleAppendWhatsappLogs([data.log]);
+        return { ok: true };
+      }
+      return { ok: false, error: data.error || 'Falha ao enviar oferta.' };
+    } catch {
+      return { ok: false, error: 'Erro de comunicação com o servidor.' };
+    }
+  };
+
+  const handleSaveLoyaltyPromotion = async (promotion: LoyaltyPromotion) => {
+    persistState((prev) => {
+      const list = prev.loyaltyPromotions ?? [];
+      const exists = list.some((p) => p.id === promotion.id);
+      return {
+        ...prev,
+        loyaltyPromotions: exists
+          ? list.map((p) => (p.id === promotion.id ? promotion : p))
+          : [promotion, ...list],
+      };
+    });
+    await fetch('/api/crm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save_promotion', promotion }),
+    }).catch(() => {});
+  };
+
+  const handleDeleteLoyaltyPromotion = async (promotionId: string) => {
+    persistState((prev) => ({
+      ...prev,
+      loyaltyPromotions: (prev.loyaltyPromotions ?? []).filter(
+        (p) => p.id !== promotionId,
+      ),
+    }));
+    await fetch(
+      `/api/crm?entity=promotion&id=${encodeURIComponent(promotionId)}`,
+      { method: 'DELETE' },
+    ).catch(() => {});
+  };
+
+  const handleSaveLoyaltyReward = async (reward: LoyaltyReward) => {
+    persistState((prev) => {
+      const list = prev.loyaltyRewards ?? [];
+      const exists = list.some((r) => r.id === reward.id);
+      return {
+        ...prev,
+        loyaltyRewards: exists
+          ? list.map((r) => (r.id === reward.id ? reward : r))
+          : [reward, ...list],
+      };
+    });
+    await fetch('/api/crm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save_reward', reward }),
+    }).catch(() => {});
+  };
+
+  const handleDeleteLoyaltyReward = async (rewardId: string) => {
+    persistState((prev) => ({
+      ...prev,
+      loyaltyRewards: (prev.loyaltyRewards ?? []).filter(
+        (r) => r.id !== rewardId,
+      ),
+    }));
+    await fetch(`/api/crm?entity=reward&id=${encodeURIComponent(rewardId)}`, {
+      method: 'DELETE',
+    }).catch(() => {});
+  };
+
+  const handleUpdateLoyaltyConfig = async (
+    updates: Partial<LoyaltyProgramConfig>,
+  ) => {
+    persistState((prev) => ({
+      ...prev,
+      loyaltyConfig: { ...prev.loyaltyConfig, ...updates },
+    }));
+    await fetch('/api/crm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update_config', config: updates }),
+    }).catch(() => {});
+  };
+
+  const handleLaunchOrderForCustomer = (customer: CrmCustomer) => {
+    setPreselectedOrderCustomer(customer);
+    setActiveModule('pedidos');
+  };
+
   const pendingOrdersCount = state.orders.filter(
     (o) => o.status === 'pendente',
   ).length;
@@ -1119,6 +1434,8 @@ export function DeliveryShell() {
           {activeModule === 'pedidos' ? (
             <OrdersManagerSection
               state={state}
+              preselectedCustomer={preselectedOrderCustomer}
+              onClearPreselectedCustomer={() => setPreselectedOrderCustomer(null)}
               onOrderCreated={handleOrderCreated}
               onUpdateOrderStatus={handleUpdateOrderStatus}
             />
@@ -1127,11 +1444,37 @@ export function DeliveryShell() {
               state={state}
               onUpdateEvolution={handleUpdateEvolution}
               onAppendLogs={handleAppendWhatsappLogs}
-              onOrderCreatedFromBot={(order, stockMovements, ingredients) =>
-                handleOrderCreated(order, { stockMovements, ingredients })
+              onOrderCreatedFromBot={(
+                order,
+                stockMovements,
+                ingredients,
+                crmSideEffects,
+              ) =>
+                handleOrderCreated(order, {
+                  stockMovements,
+                  ingredients,
+                  customers: crmSideEffects?.customers,
+                  loyaltyRewards: crmSideEffects?.loyaltyRewards,
+                  loyaltyTransactions: crmSideEffects?.loyaltyTransactions,
+                })
               }
               onOpenOrders={() => setActiveModule('pedidos')}
               onOpenSettings={openSettingsAt}
+            />
+          ) : activeModule === 'clientes' ? (
+            <CrmLoyaltySection
+              state={state}
+              onUpsertCustomer={handleUpsertCustomer}
+              onDeleteCustomer={handleDeleteCustomer}
+              onAdjustPoints={handleAdjustPoints}
+              onRedeemReward={handleRedeemReward}
+              onSendRewardOffer={handleSendRewardOffer}
+              onSavePromotion={handleSaveLoyaltyPromotion}
+              onDeletePromotion={handleDeleteLoyaltyPromotion}
+              onSaveReward={handleSaveLoyaltyReward}
+              onDeleteReward={handleDeleteLoyaltyReward}
+              onUpdateLoyaltyConfig={handleUpdateLoyaltyConfig}
+              onLaunchOrderForCustomer={handleLaunchOrderForCustomer}
             />
           ) : activeModule === 'entregadores' ? (
             <CouriersReportsSection

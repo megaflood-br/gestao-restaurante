@@ -24,7 +24,10 @@ import { calculateDeliveryQuote } from '@/lib/delivery-pricing';
 import { getStoreAvailability } from '@/lib/store-hours';
 import type {
   Coupon,
+  CrmCustomer,
   DeliveryMode,
+  LoyaltyReward,
+  LoyaltyTransaction,
   Order,
   OrderItem,
   PaymentMethod,
@@ -38,6 +41,10 @@ export interface OrderCreatedSideEffects {
   whatsappLog?: WhatsappLog | null;
   stockMovements?: StockMovement[];
   ingredients?: StockIngredient[];
+  customers?: CrmCustomer[];
+  loyaltyRewards?: LoyaltyReward[];
+  loyaltyTransactions?: LoyaltyTransaction[];
+  customerPointsEarned?: number;
 }
 
 interface CartCheckoutDrawerProps {
@@ -269,6 +276,10 @@ export function CartCheckoutDrawer({
         whatsappLog?: WhatsappLog | null;
         stockMovements?: StockMovement[];
         ingredients?: StockIngredient[];
+        customers?: CrmCustomer[];
+        loyaltyRewards?: LoyaltyReward[];
+        loyaltyTransactions?: LoyaltyTransaction[];
+        customerPointsEarned?: number;
         error?: string;
       };
 
@@ -283,6 +294,10 @@ export function CartCheckoutDrawer({
         whatsappLog: payload.whatsappLog,
         stockMovements: payload.stockMovements,
         ingredients: payload.ingredients,
+        customers: payload.customers,
+        loyaltyRewards: payload.loyaltyRewards,
+        loyaltyTransactions: payload.loyaltyTransactions,
+        customerPointsEarned: payload.customerPointsEarned,
       });
       onClearCart();
       setStep('confirmed');

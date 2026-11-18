@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Award,
   Bot,
   CheckCheck,
+  MapPin,
   MessageSquare,
   Plus,
   RefreshCw,
@@ -16,11 +18,20 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { formatCurrencyBRL, formatTimeBR } from '@/lib/formatters';
+import {
+  findCustomerByPhone,
+  formatPhoneBR,
+  getAvailableRewardsForCustomer,
+  getCustomerOrders,
+} from '@/lib/crm-engine';
 import type { SettingsTabId } from '@/components/SettingsSection';
 import type {
   BotTone,
+  CrmCustomer,
   DeliveryStoreState,
   EvolutionConfig,
+  LoyaltyReward,
+  LoyaltyTransaction,
   Order,
   StockIngredient,
   StockMovement,
@@ -35,6 +46,11 @@ interface WhatsappEvolutionSectionProps {
     order: Order,
     stockMovements: StockMovement[],
     ingredients?: StockIngredient[],
+    crmSideEffects?: {
+      customers?: CrmCustomer[];
+      loyaltyRewards?: LoyaltyReward[];
+      loyaltyTransactions?: LoyaltyTransaction[];
+    },
   ) => void;
   onOpenOrders?: () => void;
   onOpenSettings?: (tab?: SettingsTabId) => void;
@@ -56,10 +72,10 @@ const BRENDA_AVATAR_URL = '/images/avatar_brenda_atendente_1794784551375.jpg';
 
 const SIMULATED_PRESETS = [
   'Oi, tudo bem?',
+  'Quantos pontos eu tenho no clube?',
+  'Qual foi meu último pedido?',
+  'Quero 1 Strogonoff de Carne no meu endereço de sempre, pago no Pix',
   'Pode me mandar o cardápio de hoje?',
-  'Quero 1 Strogonoff de Carne',
-  'Para entregar na Rua Vergueiro, 900',
-  'Vou pagar no Pix',
   'Quero falar com um atendente humano',
 ];
 
@@ -174,12 +190,14 @@ export function WhatsappEvolutionSection({
       const clean = log.phone.replace(/\D/g, '');
       if (!clean) continue;
       const key = clean.slice(-8);
+      const crmMatch = findCustomerByPhone(state.customers, clean);
       const existing = map.get(key);
       if (!existing) {
         map.set(key, {
           key,
           phone: clean,
-          customerName: log.customerName || 'Cliente WhatsApp',
+          customerName:
+            crmMatch?.name || log.customerName || 'Cliente WhatsApp',
           lastMessage: log.message,
           lastTimestamp: log.timestamp,
           messageCount: 1,
@@ -187,7 +205,9 @@ export function WhatsappEvolutionSection({
         });
       } else {
         existing.messageCount += 1;
-        if (
+        if (crmMatch?.name) {
+          existing.customerName = crmMatch.name;
+        } else if (
           existing.customerName === 'Cliente WhatsApp' &&
           log.customerName &&
           log.customerName !== 'Cliente WhatsApp'
@@ -200,10 +220,12 @@ export function WhatsappEvolutionSection({
     const selectedClean = selectedPhone.replace(/\D/g, '');
     const selectedKey = selectedClean.slice(-8);
     if (selectedClean && !map.has(selectedKey)) {
+      const crmMatch = findCustomerByPhone(state.customers, selectedClean);
       map.set(selectedKey, {
         key: selectedKey,
         phone: selectedClean,
-        customerName: selectedCustomerName || 'Cliente Teste',
+        customerName:
+          crmMatch?.name || selectedCustomerName || 'Cliente Teste',
         lastMessage: 'Conversa pronta para simulação com a atendente',
         lastTimestamp: new Date().toISOString(),
         messageCount: 0,
@@ -212,7 +234,13 @@ export function WhatsappEvolutionSection({
     }
 
     return Array.from(map.values());
-  }, [state.whatsappLogs, selectedPhone, selectedCustomerName, handoffPhones]);
+  }, [
+    state.whatsappLogs,
+    state.customers,
+    selectedPhone,
+    selectedCustomerName,
+    handoffPhones,
+  ]);
 
   const activeThread = useMemo(() => {
     const suffix = selectedPhone.replace(/\D/g, '').slice(-8);
@@ -230,6 +258,31 @@ export function WhatsappEvolutionSection({
   }, [activeThread.length, isBotTyping]);
 
   const activeIsHandoff = isPhoneUnderHumanHandoff(selectedPhone);
+
+  const activeCrmCustomer = useMemo(
+    () => findCustomerByPhone(state.customers, selectedPhone) ?? null,
+    [state.customers, selectedPhone],
+  );
+
+  const activeCrmOrders = useMemo(
+    () =>
+      getCustomerOrders(
+        state.orders,
+        activeCrmCustomer ?? undefined,
+        selectedPhone,
+      ),
+    [state.orders, activeCrmCustomer, selectedPhone],
+  );
+
+  const activeRedeemableRewards = useMemo(() => {
+    if (!activeCrmCustomer) return [];
+    return getAvailableRewardsForCustomer(
+      activeCrmCustomer.pointsBalance,
+      state.loyaltyRewards,
+    );
+  }, [activeCrmCustomer, state.loyaltyRewards]);
+
+  const resolvedActiveName = activeCrmCustomer?.name || selectedCustomerName;
 
   const whatsappOrdersCount = useMemo(
     () => state.orders.filter((o) => o.source === 'whatsapp').length,
@@ -300,6 +353,9 @@ export function WhatsappEvolutionSection({
         createdOrder?: Order | null;
         stockMovements?: StockMovement[];
         ingredients?: StockIngredient[];
+        customers?: CrmCustomer[];
+        loyaltyRewards?: LoyaltyReward[];
+        loyaltyTransactions?: LoyaltyTransaction[];
         evolution?: EvolutionConfig;
       };
       if (data.ok) {
@@ -328,6 +384,11 @@ export function WhatsappEvolutionSection({
             data.createdOrder,
             data.stockMovements ?? [],
             data.ingredients,
+            {
+              customers: data.customers,
+              loyaltyRewards: data.loyaltyRewards,
+              loyaltyTransactions: data.loyaltyTransactions,
+            },
           );
         }
 
@@ -431,6 +492,39 @@ export function WhatsappEvolutionSection({
           `Mensagem de recuperação de venda enviada para ${customerName}.`,
         );
       } else if (!data.ok && data.error) {
+        setStatusFeedback(data.error);
+      }
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleSendCrmRewardOffer = async (
+    customer: CrmCustomer,
+    reward: LoyaltyReward,
+  ) => {
+    setBusyAction('send_reward');
+    try {
+      const res = await fetch('/api/crm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'send_reward_offer',
+          customerId: customer.id,
+          rewardId: reward.id,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        log?: WhatsappLog;
+        error?: string;
+      };
+      if (data.ok && data.log) {
+        onAppendLogs([data.log]);
+        setStatusFeedback(
+          `Oferta de fidelidade "${reward.title}" enviada no WhatsApp para ${customer.name}.`,
+        );
+      } else if (data.error) {
         setStatusFeedback(data.error);
       }
     } finally {
@@ -647,11 +741,38 @@ export function WhatsappEvolutionSection({
                   onSubmit={handleStartNewConversation}
                   className="p-3 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 space-y-2"
                 >
+                  {(state.customers ?? []).length > 0 && (
+                    <select
+                      aria-label="Selecionar cliente cadastrado no CRM para simular"
+                      value=""
+                      onChange={(e) => {
+                        const found = state.customers.find(
+                          (c) => c.id === e.target.value,
+                        );
+                        if (found) {
+                          setSelectedPhone(found.phone);
+                          setSelectedCustomerName(found.name);
+                          setShowNewChatForm(false);
+                          setComposerMode('simulate_customer');
+                        }
+                      }}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md"
+                    >
+                      <option value="">
+                        Selecionar cliente do CRM rapidamente...
+                      </option>
+                      {state.customers.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} · {formatPhoneBR(c.phone)} ({c.pointsBalance} pts)
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   <input
                     required
                     value={newChatName}
                     onChange={(e) => setNewChatName(e.target.value)}
-                    placeholder="Nome do cliente (ex.: Marcos)"
+                    placeholder="Ou digite um nome (ex.: Marcos)"
                     className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-md"
                   />
                   <div className="flex gap-2">
@@ -853,7 +974,7 @@ export function WhatsappEvolutionSection({
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <h2 className="text-sm font-bold truncate">
-                    {selectedCustomerName}
+                    {resolvedActiveName}
                   </h2>
                   <span className="text-[11px] font-mono-tabular text-emerald-200 shrink-0">
                     · {selectedPhone}
@@ -894,7 +1015,7 @@ export function WhatsappEvolutionSection({
                 type="button"
                 disabled={busyAction !== null}
                 onClick={() =>
-                  handleSendRecovery(selectedPhone, selectedCustomerName)
+                  handleSendRecovery(selectedPhone, resolvedActiveName)
                 }
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-brand-600 hover:bg-brand-700 text-white rounded-lg whitespace-nowrap"
               >
@@ -902,6 +1023,53 @@ export function WhatsappEvolutionSection({
                 <span>Recuperar Venda</span>
               </button>
             </div>
+          </div>
+
+          {/* CRM Context Strip for AI Awareness */}
+          <div className="px-5 py-2.5 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+            {activeCrmCustomer ? (
+              <>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-600 dark:text-slate-300 min-w-0">
+                  <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                    CRM Identificado:
+                  </span>
+                  <span className="inline-flex items-center gap-1 truncate">
+                    <MapPin className="w-3 h-3 text-slate-400 shrink-0" aria-hidden="true" />
+                    <span className="truncate">
+                      {activeCrmCustomer.address
+                        ? `${activeCrmCustomer.address} - ${activeCrmCustomer.neighborhood}`
+                        : 'Sem endereço salvo'}
+                    </span>
+                  </span>
+                  <span className="font-mono-tabular">
+                    · {activeCrmOrders.length} pedido(s)
+                  </span>
+                  <span className="font-mono-tabular font-bold text-brand-600 dark:text-brand-400">
+                    · {activeCrmCustomer.pointsBalance} pts
+                  </span>
+                </div>
+                {activeRedeemableRewards.length > 0 && (
+                  <button
+                    type="button"
+                    disabled={busyAction !== null}
+                    onClick={() =>
+                      handleSendCrmRewardOffer(
+                        activeCrmCustomer,
+                        activeRedeemableRewards[0],
+                      )
+                    }
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-md shrink-0 whitespace-nowrap"
+                  >
+                    <Award className="w-3 h-3" aria-hidden="true" />
+                    <span>Oferecer: {activeRedeemableRewards[0].title}</span>
+                  </button>
+                )}
+              </>
+            ) : (
+              <span className="text-slate-500 dark:text-slate-400">
+                Cliente ainda não cadastrado no CRM · será salvo automaticamente ao finalizar um pedido.
+              </span>
+            )}
           </div>
 
           {/* WhatsApp Chat Area */}

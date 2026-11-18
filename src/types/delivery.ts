@@ -2,6 +2,7 @@ export type DeliveryModuleId =
   | 'pedidos'
   | 'atendimento'
   | 'entregadores'
+  | 'clientes'
   | 'checklists'
   | 'desperdicios'
   | 'cardapio'
@@ -248,6 +249,11 @@ export interface Order {
   total: number;
   status: OrderStatus;
   courierId?: string;
+  customerId?: string;
+  loyaltyRewardId?: string;
+  loyaltyRewardTitle?: string;
+  loyaltyPointsEarned?: number;
+  loyaltyPointsRedeemed?: number;
   notes?: string;
   items: OrderItem[];
   stockDeducted?: boolean;
@@ -453,6 +459,84 @@ export interface WasteLog {
   createdAt: string;
 }
 
+export interface CrmCustomer {
+  id: string;
+  name: string;
+  phone: string;
+  address: string;
+  neighborhood: string;
+  complement?: string;
+  notes?: string;
+  tags?: string[];
+  pointsBalance: number;
+  totalPointsEarned: number;
+  totalRedeemed: number;
+  ordersCount: number;
+  totalSpent: number;
+  lastOrderAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type LoyaltyEarnMode = 'por_valor' | 'por_pedido';
+
+export interface LoyaltyProgramConfig {
+  enabled: boolean;
+  earnMode: LoyaltyEarnMode;
+  pointsPerStep: number;
+  amountStepBrl: number;
+  minOrderValueToEarn: number;
+}
+
+export type LoyaltyPromotionType =
+  | 'multiplier'
+  | 'bonus_points'
+  | 'milestone_bonus';
+
+export interface LoyaltyPromotion {
+  id: string;
+  title: string;
+  description: string;
+  type: LoyaltyPromotionType;
+  minOrderValue: number;
+  minOrdersCount?: number;
+  pointsMultiplier?: number;
+  bonusPoints?: number;
+  active: boolean;
+  createdAt: string;
+}
+
+export type LoyaltyRewardType =
+  | 'desconto_valor'
+  | 'desconto_percentual'
+  | 'brinde_item'
+  | 'frete_gratis';
+
+export interface LoyaltyReward {
+  id: string;
+  title: string;
+  description: string;
+  type: LoyaltyRewardType;
+  pointsCost: number;
+  discountValue?: number;
+  menuItemId?: string;
+  active: boolean;
+  redemptionsCount: number;
+  createdAt: string;
+}
+
+export interface LoyaltyTransaction {
+  id: string;
+  customerId: string;
+  customerName: string;
+  type: 'ganho_compra' | 'bonus_promocao' | 'resgate_premio' | 'ajuste_manual';
+  pointsDelta: number;
+  description: string;
+  orderNumber?: number;
+  rewardId?: string;
+  createdAt: string;
+}
+
 export interface DeliveryStoreState {
   store: StoreSettings;
   categories: MenuCategory[];
@@ -469,4 +553,9 @@ export interface DeliveryStoreState {
   checklistTemplates: ChecklistTemplate[];
   checklistRuns: ChecklistRun[];
   wasteLogs: WasteLog[];
+  customers: CrmCustomer[];
+  loyaltyConfig: LoyaltyProgramConfig;
+  loyaltyPromotions: LoyaltyPromotion[];
+  loyaltyRewards: LoyaltyReward[];
+  loyaltyTransactions: LoyaltyTransaction[];
 }

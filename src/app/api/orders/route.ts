@@ -9,6 +9,11 @@ import {
   applyOrderStockDeduction,
   reverseOrderStockDeduction,
 } from '@/lib/stock-engine';
+import {
+  computeRewardDiscountOnOrder,
+  findCustomerByPhone,
+  upsertCustomerAndAwardOrderPoints,
+} from '@/lib/crm-engine';
 import { calculateDeliveryQuote } from '@/lib/delivery-pricing';
 import { getStoreAvailability } from '@/lib/store-hours';
 import { formatCurrencyBRL } from '@/lib/formatters';
@@ -23,6 +28,7 @@ import type {
 
 interface CreateOrderPayload {
   source?: OrderSource;
+  customerId?: string;
   customerName: string;
   customerPhone: string;
   address: string;
@@ -32,6 +38,8 @@ interface CreateOrderPayload {
   paymentMethod: PaymentMethod;
   changeFor?: number;
   couponCode?: string;
+  loyaltyRewardId?: string;
+  saveToCrm?: boolean;
   distanceKm?: number;
   deliveryFee?: number;
   notes?: string;
@@ -110,13 +118,40 @@ export async function POST(request: NextRequest) {
       distanceKm: body.distanceKm,
     });
 
-    const deliveryFee =
+    let deliveryFee =
       typeof body.deliveryFee === 'number' &&
       Number.isFinite(body.deliveryFee) &&
       body.deliveryFee >= 0 &&
       body.deliveryMode === 'entrega'
         ? Number(body.deliveryFee.toFixed(2))
         : quote.deliveryFee;
+
+    const matchedCustomer =
+      (body.customerId
+        ? db.customers.find((c) => c.id === body.customerId)
+        : undefined) || findCustomerByPhone(db.customers, body.customerPhone);
+
+    let appliedRewardId: string | undefined;
+    let appliedRewardTitle: string | undefined;
+    if (body.loyaltyRewardId && matchedCustomer) {
+      const reward = db.loyaltyRewards.find(
+        (r) => r.id === body.loyaltyRewardId && r.active,
+      );
+      if (reward && matchedCustomer.pointsBalance >= reward.pointsCost) {
+        const rewardEffect = computeRewardDiscountOnOrder({
+          reward,
+          subtotal,
+          deliveryFee,
+        });
+        if (rewardEffect.freeDelivery) {
+          deliveryFee = 0;
+        } else if (rewardEffect.discount > 0) {
+          discount = Math.min(subtotal, Number((discount + rewardEffect.discount).toFixed(2)));
+        }
+        appliedRewardId = reward.id;
+        appliedRewardTitle = reward.title;
+      }
+    }
 
     const total = Math.max(0, Number((subtotal + deliveryFee - discount).toFixed(2)));
     const maxOrderNum = db.orders.reduce(
@@ -126,10 +161,16 @@ export async function POST(request: NextRequest) {
     const nextNumber = maxOrderNum + 1;
     const now = new Date().toISOString();
 
+    const rewardNote = appliedRewardTitle
+      ? `Prêmio fidelidade resgatado: ${appliedRewardTitle}`
+      : '';
+    const mergedNotes = [body.notes?.trim(), rewardNote].filter(Boolean).join(' · ');
+
     const newOrder: Order = {
       id: `ord-${nextNumber}-${Date.now()}`,
       orderNumber: nextNumber,
       source: body.source ?? 'cardapio',
+      customerId: matchedCustomer?.id,
       customerName: body.customerName.trim(),
       customerPhone: body.customerPhone.replace(/\D/g, ''),
       address:
@@ -145,6 +186,8 @@ export async function POST(request: NextRequest) {
       paymentMethod: body.paymentMethod,
       changeFor: body.changeFor,
       couponCode: appliedCoupon,
+      loyaltyRewardId: appliedRewardId,
+      loyaltyRewardTitle: appliedRewardTitle,
       subtotal: Number(subtotal.toFixed(2)),
       deliveryFee,
       distanceKm:
@@ -154,7 +197,7 @@ export async function POST(request: NextRequest) {
       discount,
       total,
       status: 'pendente',
-      notes: body.notes?.trim() || undefined,
+      notes: mergedNotes || undefined,
       items: body.items,
       createdAt: now,
       updatedAt: now,
@@ -172,6 +215,30 @@ export async function POST(request: NextRequest) {
       newOrder.stockDeducted = true;
       db.ingredients = stockResult.ingredients;
       db.stockMovements = [...stockResult.newMovements, ...db.stockMovements];
+    }
+
+    const crmResult = upsertCustomerAndAwardOrderPoints({
+      customers: db.customers,
+      loyaltyConfig: db.loyaltyConfig,
+      loyaltyPromotions: db.loyaltyPromotions,
+      loyaltyRewards: db.loyaltyRewards,
+      loyaltyTransactions: db.loyaltyTransactions,
+      order: newOrder,
+      autoCreate: body.saveToCrm !== false,
+      redeemedRewardId: appliedRewardId,
+    });
+
+    db.customers = crmResult.customers;
+    db.loyaltyRewards = crmResult.loyaltyRewards;
+    db.loyaltyTransactions = crmResult.loyaltyTransactions;
+    if (crmResult.customer) {
+      newOrder.customerId = crmResult.customer.id;
+    }
+    if (crmResult.pointsEarned > 0) {
+      newOrder.loyaltyPointsEarned = crmResult.pointsEarned;
+    }
+    if (crmResult.pointsRedeemed > 0) {
+      newOrder.loyaltyPointsRedeemed = crmResult.pointsRedeemed;
     }
 
     db.orders = [newOrder, ...db.orders];
@@ -219,6 +286,10 @@ export async function POST(request: NextRequest) {
         whatsappLog: createdLog,
         stockMovements: stockResult.newMovements,
         ingredients: db.ingredients,
+        customers: db.customers,
+        loyaltyRewards: db.loyaltyRewards,
+        loyaltyTransactions: db.loyaltyTransactions,
+        customerPointsEarned: crmResult.pointsEarned,
       },
       { status: 201 },
     );

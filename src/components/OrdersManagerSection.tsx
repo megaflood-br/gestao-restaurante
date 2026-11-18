@@ -22,6 +22,7 @@ import { ManualOrderModal } from '@/components/ManualOrderModal';
 import { OrderDetailDrawer } from '@/components/OrderDetailDrawer';
 import type { OrderCreatedSideEffects } from '@/components/CartCheckoutDrawer';
 import type {
+  CrmCustomer,
   DeliveryStoreState,
   Order,
   OrderStatus,
@@ -29,6 +30,8 @@ import type {
 
 interface OrdersManagerSectionProps {
   state: DeliveryStoreState;
+  preselectedCustomer?: CrmCustomer | null;
+  onClearPreselectedCustomer?: () => void;
   onOrderCreated: (order: Order, sideEffects?: OrderCreatedSideEffects) => void;
   onUpdateOrderStatus: (
     orderId: string,
@@ -71,6 +74,8 @@ function playPendingChime(): void {
 
 export function OrdersManagerSection({
   state,
+  preselectedCustomer,
+  onClearPreselectedCustomer,
   onOrderCreated,
   onUpdateOrderStatus,
 }: OrdersManagerSectionProps) {
@@ -94,6 +99,12 @@ export function OrdersManagerSection({
     }
     prevPendingRef.current = pendingCount;
   }, [pendingCount, soundEnabled]);
+
+  useEffect(() => {
+    if (preselectedCustomer) {
+      setManualOpen(true);
+    }
+  }, [preselectedCustomer]);
 
   const filteredOrders = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -612,8 +623,12 @@ export function OrdersManagerSection({
 
       <ManualOrderModal
         open={manualOpen}
-        onClose={() => setManualOpen(false)}
+        onClose={() => {
+          setManualOpen(false);
+          onClearPreselectedCustomer?.();
+        }}
         state={state}
+        preselectedCustomer={preselectedCustomer}
         onOrderCreated={onOrderCreated}
       />
 

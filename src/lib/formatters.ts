@@ -3,6 +3,8 @@ import type {
   ChecklistRole,
   ChecklistShift,
   CourierStatus,
+  LoyaltyPromotionType,
+  LoyaltyRewardType,
   OrderSource,
   OrderStatus,
   PaymentMethod,
@@ -125,4 +127,17 @@ export const WASTE_REASON_LABEL: Record<WasteReason, string> = {
   avaria_embalagem: 'Queda / Avaria na embalagem',
   qualidade: 'Fora do padrão de qualidade',
   outros: 'Outros motivos',
+};
+
+export const LOYALTY_PROMO_TYPE_LABEL: Record<LoyaltyPromotionType, string> = {
+  multiplier: 'Pontos Multiplicados',
+  bonus_points: 'Pontos Extras por Compra',
+  milestone_bonus: 'Bônus por Meta de Pedidos',
+};
+
+export const LOYALTY_REWARD_TYPE_LABEL: Record<LoyaltyRewardType, string> = {
+  desconto_valor: 'Desconto em R$',
+  desconto_percentual: 'Desconto %',
+  brinde_item: 'Prato / Bebida Grátis',
+  frete_gratis: 'Entrega Grátis',
 };

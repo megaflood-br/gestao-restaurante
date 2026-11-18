@@ -1,4 +1,11 @@
 import { formatCurrencyBRL, ORDER_STATUS_META } from '@/lib/formatters';
+import {
+  computeRewardDiscountOnOrder,
+  findCustomerByPhone,
+  getAvailableRewardsForCustomer,
+  getCustomerOrders,
+  upsertCustomerAndAwardOrderPoints,
+} from '@/lib/crm-engine';
 import { getRuntimeApiCredentials } from '@/lib/server-store';
 import { applyOrderStockDeduction } from '@/lib/stock-engine';
 import { getStoreAvailability } from '@/lib/store-hours';
@@ -16,8 +23,11 @@ interface OrderDraftState {
   items: Array<{ menuItemId: string; quantity: number }>;
   deliveryMode?: DeliveryMode;
   address?: string;
+  neighborhood?: string;
   paymentMethod?: PaymentMethod;
   couponCode?: string;
+  loyaltyRewardId?: string;
+  offeredSavedAddress?: boolean;
 }
 
 declare global {
@@ -66,9 +76,11 @@ interface CreateWhatsappOrderArgs {
   deliveryMode: DeliveryMode;
   address?: string;
   neighborhood?: string;
+  useSavedAddress?: boolean;
   paymentMethod: PaymentMethod;
   changeFor?: number;
   couponCode?: string;
+  loyaltyRewardId?: string;
   notes?: string;
 }
 
@@ -81,6 +93,8 @@ function createOrderFromBot(params: {
   ok: boolean;
   order?: Order;
   stockMovements: StockMovement[];
+  pointsEarned?: number;
+  newPointsBalance?: number;
   error?: string;
 } {
   const { state, customerPhone, customerName, args } = params;
@@ -95,6 +109,9 @@ function createOrderFromBot(params: {
         `A loja está fechada no momento. Horário: ${state.store.openingHours}.`,
     };
   }
+
+  const crmCustomer = findCustomerByPhone(state.customers, customerPhone);
+  const resolvedName = crmCustomer?.name || customerName.trim() || 'Cliente WhatsApp';
 
   const orderItems: OrderItem[] = [];
   for (const reqItem of args.items) {
@@ -149,12 +166,34 @@ function createOrderFromBot(params: {
 
   const deliveryMode: DeliveryMode =
     args.deliveryMode === 'retirada' ? 'retirada' : 'entrega';
-  const deliveryFee =
+  let deliveryFee =
     deliveryMode === 'retirada'
       ? 0
       : subtotal >= state.store.freeDeliveryMin
         ? 0
         : state.store.deliveryFee;
+
+  let appliedRewardId: string | undefined;
+  let appliedRewardTitle: string | undefined;
+  if (args.loyaltyRewardId && crmCustomer) {
+    const reward = (state.loyaltyRewards ?? []).find(
+      (r) => r.id === args.loyaltyRewardId && r.active,
+    );
+    if (reward && crmCustomer.pointsBalance >= reward.pointsCost) {
+      const rewardEffect = computeRewardDiscountOnOrder({
+        reward,
+        subtotal,
+        deliveryFee,
+      });
+      if (rewardEffect.freeDelivery) {
+        deliveryFee = 0;
+      } else if (rewardEffect.discount > 0) {
+        discount = Math.min(subtotal, Number((discount + rewardEffect.discount).toFixed(2)));
+      }
+      appliedRewardId = reward.id;
+      appliedRewardTitle = reward.title;
+    }
+  }
 
   const total = Math.max(
     0,
@@ -167,30 +206,50 @@ function createOrderFromBot(params: {
   const nextNumber = maxOrderNum + 1;
   const now = new Date().toISOString();
 
+  const resolvedAddress =
+    deliveryMode === 'retirada'
+      ? 'Retirada no Balcão'
+      : args.useSavedAddress && crmCustomer?.address
+        ? crmCustomer.address
+        : args.address?.trim() || crmCustomer?.address || 'Endereço informado via WhatsApp';
+
+  const resolvedNeighborhood =
+    deliveryMode === 'retirada'
+      ? state.store.neighborhood
+      : args.neighborhood?.trim() || crmCustomer?.neighborhood || state.store.neighborhood;
+
+  const rewardNote = appliedRewardTitle
+    ? `Prêmio fidelidade resgatado: ${appliedRewardTitle}`
+    : '';
+  const mergedNotes = [
+    args.notes?.trim() || 'Pedido fechado pelo Atendimento Virtual IA',
+    rewardNote,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
   const newOrder: Order = {
     id: `ord-${nextNumber}-${Date.now()}`,
     orderNumber: nextNumber,
     source: 'whatsapp',
-    customerName: customerName.trim() || 'Cliente WhatsApp',
+    customerId: crmCustomer?.id,
+    customerName: resolvedName,
     customerPhone: customerPhone.replace(/\D/g, ''),
-    address:
-      deliveryMode === 'retirada'
-        ? 'Retirada no Balcão'
-        : args.address?.trim() || 'Endereço informado via WhatsApp',
-    neighborhood:
-      deliveryMode === 'retirada'
-        ? state.store.neighborhood
-        : args.neighborhood?.trim() || state.store.neighborhood,
+    address: resolvedAddress,
+    neighborhood: resolvedNeighborhood,
+    complement: crmCustomer?.complement,
     deliveryMode,
     paymentMethod: args.paymentMethod || 'pix',
     changeFor: args.changeFor,
     couponCode: appliedCoupon,
+    loyaltyRewardId: appliedRewardId,
+    loyaltyRewardTitle: appliedRewardTitle,
     subtotal,
     deliveryFee,
     discount,
     total,
     status: 'pendente',
-    notes: args.notes?.trim() || 'Pedido fechado pelo Atendimento Virtual IA',
+    notes: mergedNotes,
     items: orderItems,
     createdAt: now,
     updatedAt: now,
@@ -213,12 +272,32 @@ function createOrderFromBot(params: {
     ];
   }
 
+  const crmResult = upsertCustomerAndAwardOrderPoints({
+    customers: state.customers ?? [],
+    loyaltyConfig: state.loyaltyConfig,
+    loyaltyPromotions: state.loyaltyPromotions ?? [],
+    loyaltyRewards: state.loyaltyRewards ?? [],
+    loyaltyTransactions: state.loyaltyTransactions ?? [],
+    order: newOrder,
+    autoCreate: true,
+    redeemedRewardId: appliedRewardId,
+  });
+
+  state.customers = crmResult.customers;
+  state.loyaltyRewards = crmResult.loyaltyRewards;
+  state.loyaltyTransactions = crmResult.loyaltyTransactions;
+  if (crmResult.customer) newOrder.customerId = crmResult.customer.id;
+  if (crmResult.pointsEarned > 0) newOrder.loyaltyPointsEarned = crmResult.pointsEarned;
+  if (crmResult.pointsRedeemed > 0) newOrder.loyaltyPointsRedeemed = crmResult.pointsRedeemed;
+
   state.orders = [newOrder, ...state.orders];
 
   return {
     ok: true,
     order: newOrder,
     stockMovements: stockResult.newMovements,
+    pointsEarned: crmResult.pointsEarned,
+    newPointsBalance: crmResult.customer?.pointsBalance,
   };
 }
 
@@ -237,12 +316,13 @@ function buildStoreContextPrompt(
         ? 'Use um tom direto, educado e curto, sem enrolação.'
         : 'Use um tom acolhedor, gentil e humano, típico de atendimento conversacional natural.';
 
-  const cleanPhone = customerPhone.replace(/\D/g, '');
-  const customerOrders = state.orders
-    .filter((o) =>
-      o.customerPhone.replace(/\D/g, '').endsWith(cleanPhone.slice(-8)),
-    )
-    .slice(0, 3);
+  const crmCustomer = findCustomerByPhone(state.customers, customerPhone);
+  const resolvedName = crmCustomer?.name || customerName;
+  const customerOrders = getCustomerOrders(
+    state.orders,
+    crmCustomer,
+    customerPhone,
+  ).slice(0, 5);
 
   const menuSummary = state.menuItems
     .map((item) => {
@@ -276,12 +356,59 @@ function buildStoreContextPrompt(
   const ordersSummary =
     customerOrders.length > 0
       ? customerOrders
-          .map(
-            (o) =>
-              `- Pedido #${o.orderNumber}: status "${ORDER_STATUS_META[o.status].label}", total ${formatCurrencyBRL(o.total)}, modalidade ${o.deliveryMode}.`,
-          )
+          .map((o) => {
+            const itemsDesc = o.items
+              .map((i) => `${i.quantity}x ${i.name}`)
+              .join(', ');
+            return `- Pedido #${o.orderNumber} (${ORDER_STATUS_META[o.status].label}): ${itemsDesc} — Total ${formatCurrencyBRL(o.total)}, ${o.deliveryMode}.`;
+          })
           .join('\n')
       : 'Nenhum pedido recente encontrado para este telefone.';
+
+  const loyaltyConfig = state.loyaltyConfig;
+  const activePromosSummary = (state.loyaltyPromotions ?? [])
+    .filter((p) => p.active)
+    .map((p) => `- ${p.title}: ${p.description}`)
+    .join('\n');
+
+  const redeemableRewards = crmCustomer
+    ? getAvailableRewardsForCustomer(
+        crmCustomer.pointsBalance,
+        state.loyaltyRewards,
+      )
+    : [];
+  const allActiveRewards = (state.loyaltyRewards ?? []).filter((r) => r.active);
+
+  const crmBlock = crmCustomer
+    ? [
+        `=== FICHA CRM DO CLIENTE IDENTIFICADO ===`,
+        `- Nome completo: ${crmCustomer.name}`,
+        `- WhatsApp: ${crmCustomer.phone}`,
+        `- Endereço cadastrado: ${
+          crmCustomer.address
+            ? `${crmCustomer.address}${crmCustomer.complement ? ` (${crmCustomer.complement})` : ''} - ${crmCustomer.neighborhood}`
+            : 'Não cadastrado ainda'
+        }`,
+        `- Total de pedidos: ${crmCustomer.ordersCount} | Total gasto: ${formatCurrencyBRL(crmCustomer.totalSpent)}`,
+        crmCustomer.notes
+          ? `- Preferências / Observações CRM: ${crmCustomer.notes}`
+          : '',
+        loyaltyConfig?.enabled
+          ? `- Saldo Clube Fidelidade: ${crmCustomer.pointsBalance} pontos`
+          : '',
+        redeemableRewards.length > 0
+          ? `- PRÊMIOS QUE O CLIENTE JÁ PODE RESGATAR AGORA: ${redeemableRewards
+              .map((r) => `[ID: ${r.id}] ${r.title} (${r.pointsCost} pts)`)
+              .join(' | ')}`
+          : loyaltyConfig?.enabled
+            ? `- Próximos prêmios do clube: ${allActiveRewards
+                .map((r) => `${r.title} (${r.pointsCost} pts)`)
+                .join(' | ')}`
+            : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+    : `Cliente ainda não cadastrado no CRM: ${resolvedName} (${customerPhone}).`;
 
   const rawBaseUrl = (process.env.APP_URL ?? 'https://pedidofacil.local')
     .trim()
@@ -295,21 +422,23 @@ function buildStoreContextPrompt(
     toneInstruction,
     `Regras obrigatórias de conversa:`,
     `1. Responda sempre em português do Brasil, em mensagens curtas e naturais de WhatsApp (1 a 3 frases curtas por vez).`,
-    `2. NUNCA envie lista de pratos, destaques do dia, preços ou links logo na saudação ("oi", "olá", "bom dia", "tudo bem"). Cumprimente naturalmente e pergunte como pode ajudar.`,
+    `2. NUNCA envie lista de pratos, destaques do dia, preços ou links logo na saudação ("oi", "olá", "bom dia", "tudo bem"). Cumprimente pelo primeiro nome (${resolvedName.split(' ')[0]}) naturalmente e pergunte como pode ajudar.`,
     `3. SÓ envie o cardápio (lista de pratos disponíveis e link ${appUrl}) quando o cliente pedir explicitamente para ver o cardápio, as opções ou os preços.`,
     `4. Conduza a conversa passo a passo: quando o cliente falar o que quer pedir, confirme o item e pergunte apenas a próxima informação que falta (entrega/retirada, endereço ou pagamento), sem despejar textos longos.`,
-    `5. Nunca invente pratos, preços ou promoções que não estejam nos dados abaixo.`,
+    `5. Você JÁ CONHECE o histórico, endereço salvo e saldo de fidelidade deste cliente na Ficha CRM abaixo. Se for entrega e o cliente já tiver endereço cadastrado, pergunte se pode entregar no endereço salvo ("${crmCustomer?.address || 'cadastrado'}") em vez de pedir tudo do zero.`,
+    `6. Se o cliente tiver prêmios disponíveis para resgate ou perguntar sobre pontos/fidelidade/promoções, informe o saldo atual e ofereça os prêmios compatíveis. Se ele aceitar resgatar um prêmio no pedido, envie o loyaltyRewardId na chamada da função.`,
+    `7. Nunca invente pratos, preços ou promoções que não estejam nos dados abaixo.`,
     evo.allowAiOrderCreation !== false
-      ? `6. Assim que o cliente informar os pratos desejados, modalidade (entrega com endereço ou retirada) e forma de pagamento (pix, cartao_entrega, dinheiro ou pagamento_online), chame a função "create_whatsapp_order" para registrar o pedido real na cozinha e informe o número do pedido.`
-      : `6. Quando o cliente quiser finalizar um pedido, envie o link do cardápio digital (${appUrl}).`,
+      ? `8. Assim que o cliente informar os pratos desejados, modalidade (entrega com endereço ou retirada) e forma de pagamento (pix, cartao_entrega, dinheiro ou pagamento_online), chame a função "create_whatsapp_order" para registrar o pedido real na cozinha e informe o número do pedido.`
+      : `8. Quando o cliente quiser finalizar um pedido, envie o link do cardápio digital (${appUrl}).`,
     evo.upsellEnabled !== false
-      ? `7. Durante o pedido (sem ser repetitivo), sugira de forma sutil uma bebida ou acompanhamento se o cliente ainda não tiver pedido.`
-      : `7. Mantenha o foco apenas nos itens solicitados pelo cliente.`,
+      ? `9. Durante o pedido (sem ser repetitivo), sugira de forma sutil uma bebida ou acompanhamento se o cliente ainda não tiver pedido.`
+      : `9. Mantenha o foco apenas nos itens solicitados pelo cliente.`,
     evo.humanHandoffEnabled !== false
-      ? `8. Se o cliente pedir para falar com um atendente humano, gerente ou relatar um problema urgente, chame a função "request_human_handoff" imediatamente.`
-      : `8. Responda todas as dúvidas diretamente.`,
+      ? `10. Se o cliente pedir para falar com um atendente humano, gerente ou relatar um problema urgente, chame a função "request_human_handoff" imediatamente.`
+      : `10. Responda todas as dúvidas diretamente.`,
     evo.customInstructions
-      ? `9. Instruções específicas da loja: ${evo.customInstructions}`
+      ? `11. Instruções específicas da loja: ${evo.customInstructions}`
       : ``,
     ``,
     `Dados atuais da loja:`,
@@ -327,8 +456,18 @@ function buildStoreContextPrompt(
     `Cupons ativos:`,
     couponsSummary || 'Nenhum cupom ativo no momento.',
     ``,
-    `Cliente atual: ${customerName} (${customerPhone})`,
-    `Pedidos recentes deste cliente:`,
+    `Programa e Promoções de Fidelidade:`,
+    loyaltyConfig?.enabled
+      ? `Regra base: ${
+          loyaltyConfig.earnMode === 'por_pedido'
+            ? `${loyaltyConfig.pointsPerStep} ponto(s) por pedido`
+            : `${loyaltyConfig.pointsPerStep} ponto(s) a cada ${formatCurrencyBRL(loyaltyConfig.amountStepBrl)}`
+        } (mín. ${formatCurrencyBRL(loyaltyConfig.minOrderValueToEarn)}).`
+      : 'Programa de fidelidade pausado.',
+    activePromosSummary || 'Sem promoções de fidelidade ativas.',
+    ``,
+    crmBlock,
+    `Histórico de pedidos deste cliente:`,
     ordersSummary,
   ]
     .filter(Boolean)
@@ -470,7 +609,21 @@ function generateLocalBrendiFallback(params: {
     : `${rawBaseUrl}/cardapio`;
   const cleanPhone = customerPhone.replace(/\D/g, '') || 'anonimo';
   const drafts = getOrderDrafts();
-  const firstName = customerName.split(' ')[0] || customerName;
+
+  const crmCustomer = findCustomerByPhone(state.customers, customerPhone);
+  const resolvedName = crmCustomer?.name || customerName;
+  const firstName = resolvedName.split(' ')[0] || resolvedName || 'cliente';
+  const customerOrders = getCustomerOrders(
+    state.orders,
+    crmCustomer,
+    customerPhone,
+  );
+  const redeemableRewards = crmCustomer
+    ? getAvailableRewardsForCustomer(
+        crmCustomer.pointsBalance,
+        state.loyaltyRewards,
+      )
+    : [];
 
   // 1. Human Handoff detection
   if (
@@ -523,7 +676,98 @@ function generateLocalBrendiFallback(params: {
     };
   }
 
-  // 4. Order status check
+  // 4. Loyalty points, promotions & prizes check (CRM)
+  const askedLoyalty =
+    msg.includes('ponto') ||
+    msg.includes('fidelidade') ||
+    msg.includes('prêmio') ||
+    msg.includes('premio') ||
+    msg.includes('recompensa') ||
+    msg.includes('clube') ||
+    msg.includes('brinde');
+
+  const askedRedeemWord =
+    msg.includes('resgatar') ||
+    msg.includes('usar meu prêmio') ||
+    msg.includes('usar meu premio') ||
+    msg.includes('usar prêmio') ||
+    msg.includes('usar premio');
+
+  if (askedLoyalty && !askedRedeemWord) {
+    const activePromos = (state.loyaltyPromotions ?? []).filter((p) => p.active);
+    const promoLine =
+      activePromos.length > 0
+        ? `\n\nPromoções de fidelidade ativas:\n${activePromos
+            .map((p) => `• *${p.title}*: ${p.description}`)
+            .join('\n')}`
+        : '';
+
+    if (crmCustomer) {
+      if (redeemableRewards.length > 0) {
+        const prizesList = redeemableRewards
+          .map((r) => `• *${r.title}* (${r.pointsCost} pts)`)
+          .join('\n');
+        return {
+          reply: `${firstName}, você está com *${crmCustomer.pointsBalance} pontos* no nosso Clube Fidelidade!\n\nVocê já pode resgatar agora:\n${prizesList}${promoLine}\n\nSe quiser usar algum prêmio no seu pedido hoje, é só me dizer qual!`,
+        };
+      }
+      const nextReward = (state.loyaltyRewards ?? [])
+        .filter((r) => r.active)
+        .sort((a, b) => a.pointsCost - b.pointsCost)[0];
+      const nextHint = nextReward
+        ? ` Faltam apenas *${Math.max(0, nextReward.pointsCost - crmCustomer.pointsBalance)} pts* para liberar *${nextReward.title}* (${nextReward.pointsCost} pts).`
+        : '';
+      return {
+        reply: `${firstName}, seu saldo atual é de *${crmCustomer.pointsBalance} pontos* no Clube Fidelidade.${nextHint}${promoLine}`,
+      };
+    }
+
+    const activeRewards = (state.loyaltyRewards ?? []).filter((r) => r.active);
+    return {
+      reply: `No nosso Clube Fidelidade você acumula pontos a cada compra e troca por prêmios como ${
+        activeRewards.length > 0
+          ? activeRewards
+              .slice(0, 3)
+              .map((r) => `${r.title} (${r.pointsCost} pts)`)
+              .join(', ')
+          : 'descontos e brindes'
+      }.${promoLine} Assim que fechar seu pedido por aqui já começamos a somar seus pontos!`,
+    };
+  }
+
+  // 5. Order history / repeat last order check
+  const askedHistory =
+    msg.includes('último pedido') ||
+    msg.includes('ultimo pedido') ||
+    msg.includes('histórico') ||
+    msg.includes('historico') ||
+    msg.includes('o que costumo pedir') ||
+    msg.includes('pedi da última') ||
+    msg.includes('pedi da ultima');
+
+  const wantsRepeatLast =
+    msg.includes('repetir') ||
+    msg.includes('o de sempre') ||
+    msg.includes('mesmo pedido');
+
+  if (askedHistory && !wantsRepeatLast) {
+    if (customerOrders.length === 0) {
+      return {
+        reply: `Ainda não encontrei pedidos anteriores no seu cadastro, ${firstName}. Quer que eu te mande o cardápio de hoje para fazermos o primeiro?`,
+      };
+    }
+    const last = customerOrders[0];
+    const itemsText = last.items.map((i) => `${i.quantity}x ${i.name}`).join(', ');
+    return {
+      reply: `Seu último pedido por aqui foi o *#${last.orderNumber}*: ${itemsText} (${formatCurrencyBRL(last.total)})${
+        crmCustomer?.address
+          ? `, entrega em *${crmCustomer.address} - ${crmCustomer.neighborhood}*`
+          : ''
+      }. Quer repetir esse pedido hoje?`,
+    };
+  }
+
+  // 6. Order status check
   const orderMatch = msg.match(/#?(\d{4})/);
   if (
     orderMatch ||
@@ -537,9 +781,7 @@ function generateLocalBrendiFallback(params: {
     const targetNum = orderMatch ? Number(orderMatch[1]) : null;
     const foundOrder = targetNum
       ? state.orders.find((o) => o.orderNumber === targetNum)
-      : state.orders.find((o) =>
-          o.customerPhone.replace(/\D/g, '').endsWith(cleanPhone.slice(-8)),
-        );
+      : customerOrders[0];
 
     if (foundOrder) {
       const courier = foundOrder.courierId
@@ -554,10 +796,62 @@ function generateLocalBrendiFallback(params: {
     };
   }
 
-  // 5. Multi-turn conversational order flow (items + delivery + payment)
-  const mentionedItems = extractItemsFromMessage(state, userMessage);
+  // 7. Multi-turn conversational order flow (items + CRM saved address + reward redemption + payment)
+  let mentionedItems = extractItemsFromMessage(state, userMessage);
+  if (wantsRepeatLast && customerOrders.length > 0 && mentionedItems.length === 0) {
+    mentionedItems = customerOrders[0].items
+      .filter((i) => {
+        const menu = state.menuItems.find((m) => m.id === i.menuItemId);
+        return menu && menu.available;
+      })
+      .map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity }));
+  }
+
   const details = extractDeliveryAndPayment(state, userMessage);
   const existingDraft = drafts[cleanPhone];
+
+  // Detect saved CRM address confirmation
+  const confirmedSavedAddressPhrase =
+    msg.includes('meu endereço') ||
+    msg.includes('meu endereco') ||
+    msg.includes('mesmo endereço') ||
+    msg.includes('mesmo endereco') ||
+    msg.includes('endereço de sempre') ||
+    msg.includes('endereco de sempre') ||
+    msg.includes('endereço cadastrado') ||
+    msg.includes('endereco cadastrado') ||
+    (Boolean(existingDraft?.offeredSavedAddress) &&
+      (msg === 'sim' ||
+        msg.startsWith('sim,') ||
+        msg.startsWith('sim ') ||
+        msg.includes('pode ser') ||
+        msg.includes('esse mesmo') ||
+        msg.includes('nesse mesmo')));
+
+  // Detect reward redemption request
+  let matchedReward =
+    redeemableRewards.find((r) => {
+      const titleLower = r.title.toLowerCase();
+      if (msg.includes(titleLower)) return true;
+      if (
+        (msg.includes('frete') || msg.includes('entrega grátis') || msg.includes('entrega gratis')) &&
+        r.type === 'frete_gratis'
+      ) {
+        return true;
+      }
+      if (msg.includes('suco') && r.type === 'brinde_item') return true;
+      if (
+        (askedRedeemWord || msg.includes('desconto') || msg.includes('prêmio') || msg.includes('premio')) &&
+        (r.type === 'desconto_valor' || r.type === 'desconto_percentual')
+      ) {
+        return true;
+      }
+      return false;
+    }) ?? undefined;
+
+  if (askedRedeemWord && !matchedReward && redeemableRewards.length > 0) {
+    matchedReward = redeemableRewards[0];
+  }
 
   // Check if customer is asking price/info about a single dish without ordering intent yet
   const isPureQuestion =
@@ -594,15 +888,20 @@ function generateLocalBrendiFallback(params: {
       (details.deliveryMode ||
         details.address ||
         details.paymentMethod ||
-        details.couponCode))
+        details.couponCode ||
+        confirmedSavedAddressPhrase ||
+        Boolean(matchedReward)))
   ) {
     const draft: OrderDraftState = existingDraft
       ? {
           items: [...existingDraft.items],
           deliveryMode: existingDraft.deliveryMode,
           address: existingDraft.address,
+          neighborhood: existingDraft.neighborhood,
           paymentMethod: existingDraft.paymentMethod,
           couponCode: existingDraft.couponCode,
+          loyaltyRewardId: existingDraft.loyaltyRewardId,
+          offeredSavedAddress: existingDraft.offeredSavedAddress,
         }
       : { items: [] };
 
@@ -619,12 +918,17 @@ function generateLocalBrendiFallback(params: {
     }
 
     if (details.deliveryMode) draft.deliveryMode = details.deliveryMode;
-    if (details.address) {
+    if (confirmedSavedAddressPhrase && crmCustomer?.address) {
+      draft.address = crmCustomer.address;
+      draft.neighborhood = crmCustomer.neighborhood || state.store.neighborhood;
+      if (!draft.deliveryMode) draft.deliveryMode = 'entrega';
+    } else if (details.address) {
       draft.address = details.address;
       if (!draft.deliveryMode) draft.deliveryMode = 'entrega';
     }
     if (details.paymentMethod) draft.paymentMethod = details.paymentMethod;
     if (details.couponCode) draft.couponCode = details.couponCode;
+    if (matchedReward) draft.loyaltyRewardId = matchedReward.id;
 
     drafts[cleanPhone] = draft;
 
@@ -636,42 +940,69 @@ function generateLocalBrendiFallback(params: {
       .filter(Boolean)
       .join(', ');
 
-    if (evo.allowAiOrderCreation !== false) {
+    if (evo.allowAiOrderCreation !== false && draft.items.length > 0) {
       if (!draft.deliveryMode) {
         const hasDrink = draft.items.some((i) => i.menuItemId === 'item-suco-laranja');
         const upsell =
           evo.upsellEnabled !== false && !hasDrink
             ? ' Se quiser incluir um *Suco Natural de Laranja*, é só me falar!'
             : '';
+        const rewardHint =
+          !draft.loyaltyRewardId && redeemableRewards.length > 0
+            ? ` Aliás, você tem *${crmCustomer?.pointsBalance} pontos* e já pode resgatar *${redeemableRewards[0].title}* se quiser!`
+            : '';
         return {
-          reply: `Anotado: *${itemNames}*! Vai ser para *entrega* ou *retirada no balcão*?${upsell}`,
+          reply: `Anotado, ${firstName}: *${itemNames}*! Vai ser para *entrega* ou *retirada no balcão*?${upsell}${rewardHint}`,
         };
       }
 
       if (draft.deliveryMode === 'entrega' && !draft.address) {
+        if (crmCustomer?.address && !draft.offeredSavedAddress) {
+          draft.offeredSavedAddress = true;
+          drafts[cleanPhone] = draft;
+          return {
+            reply: `Perfeito, ${firstName}! Mando no seu endereço cadastrado (*${crmCustomer.address}${
+              crmCustomer.complement ? `, ${crmCustomer.complement}` : ''
+            } - ${crmCustomer.neighborhood}*) ou prefere outro endereço?`,
+          };
+        }
         return {
           reply: `Perfeito, vamos entregar! Qual é o *endereço completo* (rua e número) para a entrega?`,
         };
       }
 
       if (!draft.paymentMethod) {
+        const appliedRewardNotice = draft.loyaltyRewardId
+          ? ` (com resgate de *${
+              redeemableRewards.find((r) => r.id === draft.loyaltyRewardId)?.title ||
+              'prêmio fidelidade'
+            }*)`
+          : '';
         return {
-          reply: `Combinado (${draft.deliveryMode === 'retirada' ? 'retirada no balcão' : `entrega em ${draft.address}`})! E como você prefere pagar: *Pix*, *cartão na entrega* ou *dinheiro*?`,
+          reply: `Combinado (${
+            draft.deliveryMode === 'retirada'
+              ? 'retirada no balcão'
+              : `entrega em ${draft.address}`
+          })${appliedRewardNotice}! E como você prefere pagar: *Pix*, *cartão na entrega* ou *dinheiro*?`,
         };
       }
 
-      // All fields complete -> create real order in kitchen!
+      // All fields complete -> create real order in kitchen + award CRM points!
       const created = createOrderFromBot({
         state,
         customerPhone,
-        customerName,
+        customerName: resolvedName,
         args: {
           items: draft.items,
           deliveryMode: draft.deliveryMode,
           address: draft.address,
-          neighborhood: state.store.neighborhood,
+          neighborhood:
+            draft.neighborhood ||
+            crmCustomer?.neighborhood ||
+            state.store.neighborhood,
           paymentMethod: draft.paymentMethod,
           couponCode: draft.couponCode,
+          loyaltyRewardId: draft.loyaltyRewardId,
         },
       });
 
@@ -682,21 +1013,44 @@ function generateLocalBrendiFallback(params: {
             ? 'Pagamento via *Pix* (chave: casadotempero@pix.com.br).'
             : `Pagamento: *${created.order.paymentMethod.replace('_', ' ')}*.`;
 
+        const rewardLine = created.order.loyaltyRewardTitle
+          ? `\n• Prêmio aplicado: *${created.order.loyaltyRewardTitle}*`
+          : '';
+        const pointsLine =
+          created.pointsEarned && created.pointsEarned > 0
+            ? `\n• Clube Fidelidade: *+${created.pointsEarned} pontos ganhos* (saldo atual: *${created.newPointsBalance ?? 0} pts*)`
+            : '';
+
         return {
           createdOrder: created.order,
           stockMovements: created.stockMovements,
-          reply: `Prontinho, ${firstName}! Pedido *#${created.order.orderNumber}* enviado para a cozinha.\n• Itens: ${itemNames}\n• ${created.order.deliveryMode === 'retirada' ? 'Retirada no Balcão' : `Entrega: ${created.order.address}`}\n• Total: *${formatCurrencyBRL(created.order.total)}*\n• ${paymentLine}\n\nPrevisão média de *${state.store.estimatedMinutes} min*. Te aviso por aqui quando sair!`,
+          reply: `Prontinho, ${firstName}! Pedido *#${created.order.orderNumber}* enviado para a cozinha.\n• Itens: ${itemNames}\n• ${
+            created.order.deliveryMode === 'retirada'
+              ? 'Retirada no Balcão'
+              : `Entrega: ${created.order.address}`
+          }${rewardLine}\n• Total: *${formatCurrencyBRL(created.order.total)}*\n• ${paymentLine}${pointsLine}\n\nPrevisão média de *${state.store.estimatedMinutes} min*. Te aviso por aqui quando sair!`,
         };
       }
+    } else if (matchedReward) {
+      return {
+        reply: `Anotado, ${firstName}! Vou aplicar o prêmio *${matchedReward.title}* no seu pedido. Qual prato você vai querer hoje?`,
+      };
     }
   }
 
-  // 6. Coupons question
+  // 8. Coupons / promos question
   if (msg.includes('cupom') || msg.includes('desconto') || msg.includes('promo')) {
     const activeCoupons = state.coupons.filter((c) => c.active);
+    const activeLoyaltyPromos = (state.loyaltyPromotions ?? []).filter((p) => p.active);
+    const loyaltyPart =
+      activeLoyaltyPromos.length > 0
+        ? `\n\nE no Clube Fidelidade temos:\n${activeLoyaltyPromos
+            .map((p) => `• *${p.title}*: ${p.description}`)
+            .join('\n')}`
+        : '';
     if (activeCoupons.length === 0) {
       return {
-        reply: `Hoje estamos sem cupom ativo, mas pedidos acima de *${formatCurrencyBRL(state.store.freeDeliveryMin)}* têm *entrega grátis*!`,
+        reply: `Hoje estamos sem cupom ativo, mas pedidos acima de *${formatCurrencyBRL(state.store.freeDeliveryMin)}* têm *entrega grátis*!${loyaltyPart}`,
       };
     }
     const list = activeCoupons
@@ -706,11 +1060,11 @@ function generateLocalBrendiFallback(params: {
       )
       .join('\n');
     return {
-      reply: `Temos estes cupons ativos hoje:\n${list}\n\nÉ só me dizer o nome do cupom quando for fechar seu pedido!`,
+      reply: `Temos estes cupons ativos hoje:\n${list}${loyaltyPart}\n\nÉ só me dizer o nome do cupom quando for fechar seu pedido!`,
     };
   }
 
-  // 7. Delivery fee / hours / payment info
+  // 9. Delivery fee / hours / payment info
   if (
     msg.includes('entrega') ||
     msg.includes('taxa') ||
@@ -725,7 +1079,7 @@ function generateLocalBrendiFallback(params: {
     };
   }
 
-  // 8. Generic "want to order" without specifying dish yet -> natural reply, no giant menu dump
+  // 10. Generic "want to order" without specifying dish yet -> natural reply, no giant menu dump
   if (
     msg.includes('fazer um pedido') ||
     msg.includes('quero pedir') ||
@@ -733,12 +1087,16 @@ function generateLocalBrendiFallback(params: {
     msg.includes('pedir almoco') ||
     msg.includes('quero uma marmita')
   ) {
+    const lastOrderHint =
+      customerOrders.length > 0
+        ? ` Quer repetir o último (*${customerOrders[0].items.map((i) => `${i.quantity}x ${i.name}`).join(', ')}*) ou prefere ver o cardápio de hoje?`
+        : ' Você já sabe qual prato vai querer hoje ou prefere que eu te mande o cardápio?';
     return {
-      reply: `Com certeza, ${firstName}! Você já sabe qual prato vai querer hoje ou prefere que eu te mande o cardápio?`,
+      reply: `Com certeza, ${firstName}!${lastOrderHint}`,
     };
   }
 
-  // 9. Natural, short greeting (NO menu dump, NO giant text!)
+  // 11. Natural, short greeting (NO menu dump, NO giant text!) — recognizes CRM customer!
   const isGreeting =
     msg.includes('oi') ||
     msg.includes('olá') ||
@@ -754,22 +1112,27 @@ function generateLocalBrendiFallback(params: {
     msg.includes('alô');
 
   if (isGreeting) {
+    const loyaltyGreetingHint =
+      crmCustomer && redeemableRewards.length > 0
+        ? ` Vi aqui que você já tem *${crmCustomer.pointsBalance} pontos* no Clube Fidelidade e pode resgatar *${redeemableRewards[0].title}* hoje!`
+        : '';
+
     if (tone === 'descontraido') {
       return {
-        reply: `Oi, ${firstName}! Tudo ótimo por aqui e com você? Sou a ${assistantName}, da ${state.store.name}. Como posso te ajudar hoje?`,
+        reply: `Oi, ${firstName}! Tudo ótimo por aqui e com você? Sou a ${assistantName}, da ${state.store.name}.${loyaltyGreetingHint} Como posso te ajudar hoje?`,
       };
     }
     if (tone === 'objetivo') {
       return {
-        reply: `Olá, ${firstName}! Aqui é a ${assistantName}, da ${state.store.name}. Como posso te ajudar agora?`,
+        reply: `Olá, ${firstName}! Aqui é a ${assistantName}, da ${state.store.name}.${loyaltyGreetingHint} Como posso te ajudar agora?`,
       };
     }
     return {
-      reply: `Oi, ${firstName}! Tudo bem? Aqui é a ${assistantName}, da ${state.store.name}. Como posso te ajudar hoje?`,
+      reply: `Oi, ${firstName}! Tudo bem? Aqui é a ${assistantName}, da ${state.store.name}.${loyaltyGreetingHint} Como posso te ajudar hoje?`,
     };
   }
 
-  // 10. Polite acknowledgements / closing
+  // 12. Polite acknowledgements / closing
   if (
     msg.includes('obrigad') ||
     msg.includes('valeu') ||
@@ -783,9 +1146,9 @@ function generateLocalBrendiFallback(params: {
     };
   }
 
-  // 11. Conversational fallback without dumping menu
+  // 13. Conversational fallback without dumping menu
   return {
-    reply: `Entendi, ${firstName}! Se quiser ver o cardápio de hoje, tirar alguma dúvida ou já fazer seu pedido, é só me falar por aqui.`,
+    reply: `Entendi, ${firstName}! Se quiser ver o cardápio de hoje, consultar seus pontos de fidelidade ou já fazer seu pedido, é só me falar por aqui.`,
   };
 }
 
@@ -807,6 +1170,8 @@ export async function generateBrendiBotReply(params: {
   const cleanPhone = phone.replace(/\D/g, '') || 'anonimo';
   const evo = state.store.evolution;
   const normalizedMsg = userMessage.toLowerCase().trim();
+  const crmCustomer = findCustomerByPhone(state.customers, phone);
+  const resolvedCustomerName = crmCustomer?.name || customerName;
 
   // Anti-Ban Opt-Out compliance: immediately honor STOP/PARAR requests
   const optOutKeywords = [
@@ -837,7 +1202,7 @@ export async function generateBrendiBotReply(params: {
     ) {
       evo.optOutPhones = [...currentOptOut, cleanPhone];
     }
-    const firstName = customerName.split(' ')[0] || 'cliente';
+    const firstName = resolvedCustomerName.split(' ')[0] || 'cliente';
     return {
       reply: `Tudo bem, ${firstName}! Removi seu número da nossa lista de mensagens automáticas. Você não receberá mais avisos ou ofertas por aqui.`,
       engine: 'assistente_local',
@@ -860,7 +1225,7 @@ export async function generateBrendiBotReply(params: {
 
   const memory = getSessionMemory();
   const history = memory[cleanPhone] ?? [];
-  const systemPrompt = buildStoreContextPrompt(state, phone, customerName);
+  const systemPrompt = buildStoreContextPrompt(state, phone, resolvedCustomerName);
   const recentTurns = history.slice(-8).map((m) => ({
     role: m.role,
     content: m.content,
@@ -884,7 +1249,7 @@ export async function generateBrendiBotReply(params: {
                 function: {
                   name: 'create_whatsapp_order',
                   description:
-                    'Cria um pedido real na cozinha quando o cliente informou pratos, entrega/retirada e forma de pagamento.',
+                    'Cria um pedido real na cozinha quando o cliente informou pratos, entrega/retirada e forma de pagamento. Pode usar o endereço salvo do CRM e resgatar prêmios de fidelidade.',
                   parameters: {
                     type: 'object',
                     properties: {
@@ -906,6 +1271,11 @@ export async function generateBrendiBotReply(params: {
                       },
                       address: { type: 'string' },
                       neighborhood: { type: 'string' },
+                      useSavedAddress: {
+                        type: 'boolean',
+                        description:
+                          'Defina como true quando o cliente confirmar entrega no endereço cadastrado no CRM.',
+                      },
                       paymentMethod: {
                         type: 'string',
                         enum: [
@@ -917,6 +1287,11 @@ export async function generateBrendiBotReply(params: {
                       },
                       changeFor: { type: 'number' },
                       couponCode: { type: 'string' },
+                      loyaltyRewardId: {
+                        type: 'string',
+                        description:
+                          'ID de um prêmio elegível da Ficha CRM caso o cliente peça ou aceite resgatar neste pedido.',
+                      },
                       notes: { type: 'string' },
                     },
                     required: ['items', 'deliveryMode', 'paymentMethod'],
@@ -998,7 +1373,7 @@ export async function generateBrendiBotReply(params: {
               const result = createOrderFromBot({
                 state,
                 customerPhone: phone,
-                customerName,
+                customerName: resolvedCustomerName,
                 args,
               });
               if (result.ok && result.order) {
@@ -1013,6 +1388,9 @@ export async function generateBrendiBotReply(params: {
                     total: result.order.total,
                     deliveryMode: result.order.deliveryMode,
                     estimatedMinutes: state.store.estimatedMinutes,
+                    pointsEarned: result.pointsEarned ?? 0,
+                    newPointsBalance: result.newPointsBalance ?? null,
+                    appliedRewardTitle: result.order.loyaltyRewardTitle ?? null,
                   }),
                 });
               } else {
@@ -1080,7 +1458,7 @@ export async function generateBrendiBotReply(params: {
     const localRes = generateLocalBrendiFallback({
       state,
       customerPhone: phone,
-      customerName,
+      customerName: resolvedCustomerName,
       userMessage,
     });
     reply = localRes.reply;

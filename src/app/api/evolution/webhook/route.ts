@@ -6,6 +6,7 @@ import {
   sendEvolutionText,
 } from '@/lib/evolution-client';
 import { generateBrendiBotReply } from '@/lib/whatsapp-bot';
+import { findCustomerByPhone } from '@/lib/crm-engine';
 
 declare global {
   var __evolutionProcessedMessageIds: string[] | undefined;
@@ -108,9 +109,13 @@ export async function POST(request: NextRequest) {
 
     const rawPhone = body.phone || remoteJid.replace(/@.*/, '') || '';
     const cleanPhone = rawPhone.replace(/\D/g, '');
+    const crmCustomer = findCustomerByPhone(db.customers, cleanPhone);
+    const bodyName = body.customerName?.trim();
+    const pushName = body.data?.pushName?.trim();
     const customerName =
-      body.customerName?.trim() ||
-      body.data?.pushName?.trim() ||
+      crmCustomer?.name ||
+      (bodyName && bodyName !== 'Cliente WhatsApp' ? bodyName : '') ||
+      pushName ||
       'Cliente WhatsApp';
     const inboundText =
       body.message?.trim() ||
@@ -218,6 +223,10 @@ export async function POST(request: NextRequest) {
       createdOrder: botRes.createdOrder ?? null,
       stockMovements: botRes.stockMovements ?? [],
       ingredients: botRes.createdOrder ? db.ingredients : undefined,
+      customers: botRes.createdOrder ? db.customers : undefined,
+      loyaltyRewards: botRes.createdOrder ? db.loyaltyRewards : undefined,
+      loyaltyTransactions: botRes.createdOrder ? db.loyaltyTransactions : undefined,
+      crmCustomer: crmCustomer ?? null,
       evolution: db.store.evolution,
     });
   } catch {
