@@ -1267,6 +1267,9 @@ export function DeliveryShell() {
       staffTasks: (prev.staffTasks ?? []).filter(
         (t) => t.employeeId !== employeeId,
       ),
+      employeeLedger: (prev.employeeLedger ?? []).filter(
+        (entry) => entry.employeeId !== employeeId,
+      ),
       checklistTemplates: (prev.checklistTemplates ?? []).map((tpl) => ({
         ...tpl,
         assignedEmployeeIds: (tpl.assignedEmployeeIds ?? []).filter(

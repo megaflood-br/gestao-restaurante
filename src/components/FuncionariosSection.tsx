@@ -1046,12 +1046,17 @@ export function FuncionariosSection({
                           <button
                             type="button"
                             onClick={() => {
+                              const removedName = selectedEmployee.name;
                               onDeleteEmployee(selectedEmployee.id);
                               setConfirmDeleteEmpId(null);
+                              setFeedback({
+                                type: 'ok',
+                                text: `Funcionário ${removedName} excluído com sucesso.`,
+                              });
                             }}
                             className="px-2.5 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg"
                           >
-                            Confirmar
+                            Confirmar Exclusão
                           </button>
                           <button
                             type="button"
@@ -1068,9 +1073,10 @@ export function FuncionariosSection({
                             setConfirmDeleteEmpId(selectedEmployee.id)
                           }
                           aria-label={`Excluir ${selectedEmployee.name}`}
-                          className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/60 hover:bg-red-100 dark:hover:bg-red-950/60 rounded-lg"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Excluir</span>
                         </button>
                       )}
                     </div>
@@ -2193,20 +2199,61 @@ export function FuncionariosSection({
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setEmpModalOpen(false)}
-                  className="px-4 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-lg"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg"
-                >
-                  {editingEmp ? 'Salvar Alterações' : 'Cadastrar Funcionário'}
-                </button>
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
+                <div>
+                  {editingEmp &&
+                    (confirmDeleteEmpId === editingEmp.id ? (
+                      <div className="inline-flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const removedName = editingEmp.name;
+                            onDeleteEmployee(editingEmp.id);
+                            setConfirmDeleteEmpId(null);
+                            setEmpModalOpen(false);
+                            setFeedback({
+                              type: 'ok',
+                              text: `Funcionário ${removedName} excluído com sucesso.`,
+                            });
+                          }}
+                          className="px-3 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg"
+                        >
+                          Confirmar Exclusão
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteEmpId(null)}
+                          className="px-3 py-2 text-xs text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-lg"
+                        >
+                          Voltar
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteEmpId(editingEmp.id)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-950/50 rounded-lg"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Excluir Funcionário</span>
+                      </button>
+                    ))}
+                </div>
+                <div className="flex items-center gap-2 ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => setEmpModalOpen(false)}
+                    className="px-4 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-lg"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg"
+                  >
+                    {editingEmp ? 'Salvar Alterações' : 'Cadastrar Funcionário'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

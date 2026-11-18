@@ -296,6 +296,7 @@ export async function DELETE(request: NextRequest) {
     if (entity === 'employee') {
       db.employees = db.employees.filter((e) => e.id !== id);
       db.staffTasks = db.staffTasks.filter((t) => t.employeeId !== id);
+      db.employeeLedger = db.employeeLedger.filter((e) => e.employeeId !== id);
       db.checklistTemplates = db.checklistTemplates.map((tpl) => ({
         ...tpl,
         assignedEmployeeIds: (tpl.assignedEmployeeIds ?? []).filter(
@@ -306,6 +307,7 @@ export async function DELETE(request: NextRequest) {
         ok: true,
         employees: db.employees,
         staffTasks: db.staffTasks,
+        employeeLedger: db.employeeLedger,
       });
     }
 
