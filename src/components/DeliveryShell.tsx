@@ -35,7 +35,9 @@ import { getCurrentMonthKey } from '@/lib/finance-engine';
 import { getStoreAvailability } from '@/lib/store-hours';
 import { DigitalMenuSection } from '@/components/DigitalMenuSection';
 import { OrdersManagerSection } from '@/components/OrdersManagerSection';
+import { KitchenPriorityAlertBar } from '@/components/KitchenPriorityAlertBar';
 import { WhatsappEvolutionSection } from '@/components/WhatsappEvolutionSection';
+import { useKitchenRealtime } from '@/lib/use-kitchen-realtime';
 import { CrmLoyaltySection } from '@/components/CrmLoyaltySection';
 import { CatalogCouponsSection } from '@/components/CatalogCouponsSection';
 import { StockTechnicalSheetSection } from '@/components/StockTechnicalSheetSection';
@@ -75,6 +77,7 @@ import type {
   MenuCategory,
   MenuItem,
   Order,
+  OrderPriority,
   OrderStatus,
   RecurringExpense,
   StaffTask,
@@ -566,6 +569,69 @@ export function DeliveryShell() {
       // Ignore network errors on optimistic status change
     }
   };
+
+  const handleUpdateOrderPriority = async (
+    orderId: string,
+    priority: OrderPriority,
+    priorityReason?: string,
+  ) => {
+    const now = new Date().toISOString();
+    persistState((prev) => ({
+      ...prev,
+      orders: prev.orders.map((order) =>
+        order.id === orderId
+          ? {
+              ...order,
+              priority,
+              priorityReason:
+                priority === 'prioritario'
+                  ? priorityReason?.trim() ||
+                    order.priorityReason ||
+                    'Elevado para prioritário'
+                  : undefined,
+              priorityAcknowledgedAt:
+                priority === 'normal' ? undefined : order.priorityAcknowledgedAt,
+              priorityAcknowledgedBy:
+                priority === 'normal' ? undefined : order.priorityAcknowledgedBy,
+              updatedAt: now,
+            }
+          : order,
+      ),
+    }));
+
+    try {
+      await fetch('/api/orders', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: orderId,
+          priority,
+          priorityReason,
+        }),
+      });
+    } catch {
+      // Optimistic state remains
+    }
+  };
+
+  const realtime = useKitchenRealtime({
+    enabled: true,
+    ordersSnapshot: state.orders,
+    actorName: 'Gestão / Balcão',
+    onOrderEvent: (event) => {
+      if (!event.order) return;
+      const incoming = event.order;
+      persistState((prev) => {
+        const exists = prev.orders.some((o) => o.id === incoming.id);
+        return {
+          ...prev,
+          orders: exists
+            ? prev.orders.map((o) => (o.id === incoming.id ? incoming : o))
+            : [incoming, ...prev.orders],
+        };
+      });
+    },
+  });
 
   const handleAddMenuItem = (item: MenuItem) => {
     persistState((prev) => ({
@@ -1712,7 +1778,26 @@ export function DeliveryShell() {
           </div>
         </header>
 
-        <main className="flex-1 p-5 sm:p-8 max-w-7xl w-full mx-auto">
+        <main className="flex-1 p-5 sm:p-8 max-w-7xl w-full mx-auto space-y-5">
+          {(realtime.activePriorityOrders.length > 0 ||
+            activeModule === 'pedidos') && (
+            <KitchenPriorityAlertBar
+              connectionStatus={realtime.connectionStatus}
+              activePriorityOrders={realtime.activePriorityOrders}
+              unacknowledgedPriorityOrders={realtime.unacknowledgedPriorityOrders}
+              soundEnabled={realtime.soundEnabled}
+              notifPermission={realtime.notifPermission}
+              actionLoadingId={realtime.actionLoadingId}
+              actorName="Gestão / Cozinha"
+              onToggleSound={realtime.toggleSound}
+              onTestSound={realtime.playUrgentChime}
+              onRequestBrowserNotifications={realtime.requestBrowserNotifications}
+              onAcknowledge={realtime.acknowledgePriorityOrder}
+              onStartPrep={realtime.startPreparingOrder}
+              compactHeaderOnlyWhenEmpty
+            />
+          )}
+
           {activeModule === 'pedidos' ? (
             <OrdersManagerSection
               state={state}
@@ -1720,6 +1805,7 @@ export function DeliveryShell() {
               onClearPreselectedCustomer={() => setPreselectedOrderCustomer(null)}
               onOrderCreated={handleOrderCreated}
               onUpdateOrderStatus={handleUpdateOrderStatus}
+              onUpdateOrderPriority={handleUpdateOrderPriority}
             />
           ) : activeModule === 'atendimento' ? (
             <WhatsappEvolutionSection

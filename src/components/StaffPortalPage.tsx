@@ -50,6 +50,8 @@ import {
   getCompatibleUnits,
   previewWasteDeduction,
 } from '@/lib/stock-engine';
+import { KitchenPriorityAlertBar } from '@/components/KitchenPriorityAlertBar';
+import { useKitchenRealtime } from '@/lib/use-kitchen-realtime';
 import type {
   ChecklistRole,
   ChecklistRun,
@@ -111,6 +113,9 @@ function hydrateState(parsed: DeliveryStoreState): DeliveryStoreState {
     employeeLedger: Array.isArray(parsed.employeeLedger)
       ? parsed.employeeLedger
       : INITIAL_DELIVERY_STATE.employeeLedger,
+    orders: Array.isArray(parsed.orders)
+      ? parsed.orders
+      : INITIAL_DELIVERY_STATE.orders,
   };
 }
 
@@ -284,6 +289,29 @@ export function StaffPortalPage() {
     if (!candidate || candidate.status === 'inativo') return null;
     return candidate;
   }, [state.employees, loggedEmployeeId, loggedEmployeeFallback]);
+
+  const realtime = useKitchenRealtime({
+    enabled: Boolean(loggedEmployee),
+    ordersSnapshot: state.orders,
+    actorName: loggedEmployee?.name ?? 'Equipe Cozinha',
+    onOrderEvent: (event) => {
+      if (!event.order) return;
+      const incoming = event.order;
+      setState((prev) => {
+        const exists = prev.orders.some((o) => o.id === incoming.id);
+        const nextOrders = exists
+          ? prev.orders.map((o) => (o.id === incoming.id ? incoming : o))
+          : [incoming, ...prev.orders];
+        const next = { ...prev, orders: nextOrders };
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    },
+  });
 
   const handlePhoneLogin = async (e: FormEvent) => {
     e.preventDefault();
@@ -937,6 +965,25 @@ export function StaffPortalPage() {
                 <span>Sair</span>
               </button>
             </section>
+
+            <KitchenPriorityAlertBar
+              connectionStatus={realtime.connectionStatus}
+              activePriorityOrders={realtime.activePriorityOrders}
+              unacknowledgedPriorityOrders={realtime.unacknowledgedPriorityOrders}
+              soundEnabled={realtime.soundEnabled}
+              notifPermission={realtime.notifPermission}
+              actionLoadingId={realtime.actionLoadingId}
+              actorName={loggedEmployee.name}
+              onToggleSound={realtime.toggleSound}
+              onTestSound={realtime.playUrgentChime}
+              onRequestBrowserNotifications={realtime.requestBrowserNotifications}
+              onAcknowledge={realtime.acknowledgePriorityOrder}
+              onStartPrep={realtime.startPreparingOrder}
+              compactHeaderOnlyWhenEmpty={
+                loggedEmployee.role !== 'cozinha' &&
+                loggedEmployee.role !== 'gerencia'
+              }
+            />
 
             {activeRun ? (
               <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-6 space-y-5">

@@ -17,10 +17,15 @@ import {
 import { calculateDeliveryQuote } from '@/lib/delivery-pricing';
 import { getStoreAvailability } from '@/lib/store-hours';
 import { formatCurrencyBRL } from '@/lib/formatters';
+import {
+  broadcastOrderEvent,
+  getActivePriorityOrders,
+} from '@/lib/realtime-bus';
 import type {
   DeliveryMode,
   Order,
   OrderItem,
+  OrderPriority,
   OrderSource,
   OrderStatus,
   PaymentMethod,
@@ -42,6 +47,8 @@ interface CreateOrderPayload {
   saveToCrm?: boolean;
   distanceKm?: number;
   deliveryFee?: number;
+  priority?: OrderPriority;
+  priorityReason?: string;
   notes?: string;
   items: OrderItem[];
 }
@@ -166,6 +173,7 @@ export async function POST(request: NextRequest) {
       : '';
     const mergedNotes = [body.notes?.trim(), rewardNote].filter(Boolean).join(' · ');
 
+    const isPriority = body.priority === 'prioritario';
     const newOrder: Order = {
       id: `ord-${nextNumber}-${Date.now()}`,
       orderNumber: nextNumber,
@@ -197,6 +205,10 @@ export async function POST(request: NextRequest) {
       discount,
       total,
       status: 'pendente',
+      priority: isPriority ? 'prioritario' : 'normal',
+      priorityReason: isPriority
+        ? body.priorityReason?.trim() || 'Pedido marcado como prioritário'
+        : undefined,
       notes: mergedNotes || undefined,
       items: body.items,
       createdAt: now,
@@ -279,6 +291,26 @@ export async function POST(request: NextRequest) {
       db.whatsappLogs = [createdLog, ...db.whatsappLogs];
     }
 
+    const activePriorityOrders = getActivePriorityOrders(db.orders);
+    broadcastOrderEvent({
+      id: `evt-create-${newOrder.id}-${Date.now()}`,
+      type: 'order:created',
+      timestamp: now,
+      order: newOrder,
+      activePriorityOrders,
+    });
+
+    if (newOrder.priority === 'prioritario') {
+      broadcastOrderEvent({
+        id: `evt-prio-${newOrder.id}-${Date.now()}`,
+        type: 'order:priority_alert',
+        timestamp: now,
+        order: newOrder,
+        activePriorityOrders,
+        message: `Novo pedido prioritário #${newOrder.orderNumber} (${newOrder.customerName})`,
+      });
+    }
+
     return NextResponse.json(
       {
         ok: true,
@@ -307,6 +339,9 @@ export async function PATCH(request: NextRequest) {
       id: string;
       status?: OrderStatus;
       courierId?: string;
+      priority?: OrderPriority;
+      priorityReason?: string;
+      acknowledgePriority?: { by: string };
     };
 
     const db = getDeliveryStore();
@@ -319,14 +354,54 @@ export async function PATCH(request: NextRequest) {
     }
 
     const now = new Date().toISOString();
+    const wasPriority = order.priority === 'prioritario';
+
     if (body.courierId !== undefined) {
       order.courierId = body.courierId;
+    }
+
+    if (body.priority !== undefined) {
+      order.priority = body.priority;
+      if (body.priority === 'prioritario') {
+        order.priorityReason =
+          body.priorityReason?.trim() ||
+          order.priorityReason ||
+          'Prioridade acionada pela operação';
+        if (!wasPriority) {
+          order.priorityAcknowledgedAt = undefined;
+          order.priorityAcknowledgedBy = undefined;
+        }
+      } else {
+        order.priorityReason = undefined;
+        order.priorityAcknowledgedAt = undefined;
+        order.priorityAcknowledgedBy = undefined;
+      }
+      order.updatedAt = now;
+    } else if (body.priorityReason !== undefined && order.priority === 'prioritario') {
+      order.priorityReason = body.priorityReason.trim() || undefined;
+      order.updatedAt = now;
+    }
+
+    if (body.acknowledgePriority) {
+      order.priorityAcknowledgedAt = now;
+      order.priorityAcknowledgedBy =
+        body.acknowledgePriority.by?.trim() || 'Cozinha';
+      order.updatedAt = now;
     }
 
     if (body.status && body.status !== order.status) {
       order.status = body.status;
       order.updatedAt = now;
       order.history = [...order.history, { status: body.status, at: now }];
+      if (
+        order.priority === 'prioritario' &&
+        body.status !== 'pendente' &&
+        !order.priorityAcknowledgedAt
+      ) {
+        order.priorityAcknowledgedAt = now;
+        order.priorityAcknowledgedBy =
+          body.acknowledgePriority?.by?.trim() || 'Cozinha (em preparo)';
+      }
 
       let generatedMovements = [] as typeof db.stockMovements;
       if (body.status === 'cancelado' && order.stockDeducted) {
@@ -420,12 +495,52 @@ export async function PATCH(request: NextRequest) {
         }
       }
 
+      const activePriorityOrders = getActivePriorityOrders(db.orders);
+      broadcastOrderEvent({
+        id: `evt-upd-${order.id}-${Date.now()}`,
+        type: 'order:updated',
+        timestamp: now,
+        order,
+        activePriorityOrders,
+      });
+
+      if (!wasPriority && order.priority === 'prioritario') {
+        broadcastOrderEvent({
+          id: `evt-prio-${order.id}-${Date.now()}`,
+          type: 'order:priority_alert',
+          timestamp: now,
+          order,
+          activePriorityOrders,
+          message: `Pedido #${order.orderNumber} elevado para PRIORITÁRIO`,
+        });
+      }
+
       return NextResponse.json({
         ok: true,
         order,
         whatsappLog: statusLog,
         stockMovements: generatedMovements,
         ingredients: db.ingredients,
+      });
+    }
+
+    const activePriorityOrders = getActivePriorityOrders(db.orders);
+    broadcastOrderEvent({
+      id: `evt-upd-${order.id}-${Date.now()}`,
+      type: 'order:updated',
+      timestamp: now,
+      order,
+      activePriorityOrders,
+    });
+
+    if (!wasPriority && order.priority === 'prioritario') {
+      broadcastOrderEvent({
+        id: `evt-prio-${order.id}-${Date.now()}`,
+        type: 'order:priority_alert',
+        timestamp: now,
+        order,
+        activePriorityOrders,
+        message: `Pedido #${order.orderNumber} elevado para PRIORITÁRIO`,
       });
     }
 

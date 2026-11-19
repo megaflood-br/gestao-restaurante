@@ -29,6 +29,8 @@ import {
   getCompatibleUnits,
   previewWasteDeduction,
 } from '@/lib/stock-engine';
+import { KitchenPriorityAlertBar } from '@/components/KitchenPriorityAlertBar';
+import { useKitchenRealtime } from '@/lib/use-kitchen-realtime';
 import type {
   ChecklistRun,
   ChecklistTemplate,
@@ -78,6 +80,9 @@ function hydrateState(parsed: DeliveryStoreState): DeliveryStoreState {
     wasteLogs: Array.isArray(parsed.wasteLogs)
       ? parsed.wasteLogs
       : INITIAL_DELIVERY_STATE.wasteLogs,
+    orders: Array.isArray(parsed.orders)
+      ? parsed.orders
+      : INITIAL_DELIVERY_STATE.orders,
   };
 }
 
@@ -155,6 +160,29 @@ export function KitchenWastePortalPage() {
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, [loadFromSources]);
+
+  const realtime = useKitchenRealtime({
+    enabled: true,
+    ordersSnapshot: state.orders,
+    actorName: cookName.trim() || 'Cozinheira',
+    onOrderEvent: (event) => {
+      if (!event.order) return;
+      const incoming = event.order;
+      setState((prev) => {
+        const exists = prev.orders.some((o) => o.id === incoming.id);
+        const nextOrders = exists
+          ? prev.orders.map((o) => (o.id === incoming.id ? incoming : o))
+          : [incoming, ...prev.orders];
+        const next = { ...prev, orders: nextOrders };
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    },
+  });
 
   const handleToggleTheme = () => {
     const nextDark = !isDark;
@@ -437,6 +465,21 @@ export function KitchenWastePortalPage() {
       </header>
 
       <main className="max-w-3xl mx-auto p-4 sm:p-6 space-y-5">
+        <KitchenPriorityAlertBar
+          connectionStatus={realtime.connectionStatus}
+          activePriorityOrders={realtime.activePriorityOrders}
+          unacknowledgedPriorityOrders={realtime.unacknowledgedPriorityOrders}
+          soundEnabled={realtime.soundEnabled}
+          notifPermission={realtime.notifPermission}
+          actionLoadingId={realtime.actionLoadingId}
+          actorName={cookName.trim() || 'Cozinheira'}
+          onToggleSound={realtime.toggleSound}
+          onTestSound={realtime.playUrgentChime}
+          onRequestBrowserNotifications={realtime.requestBrowserNotifications}
+          onAcknowledge={realtime.acknowledgePriorityOrder}
+          onStartPrep={realtime.startPreparingOrder}
+        />
+
         {feedback && (
           <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center justify-between gap-3 text-sm font-medium text-emerald-800 dark:text-emerald-300">
             <div className="flex items-center gap-2">

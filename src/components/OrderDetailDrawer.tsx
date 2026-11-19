@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Printer, X, Bike } from 'lucide-react';
+import { Printer, X, Bike, Flame } from 'lucide-react';
 import {
   formatCurrencyBRL,
   formatDateTimeBR,
@@ -13,6 +13,7 @@ import {
 import type {
   Courier,
   Order,
+  OrderPriority,
   OrderStatus,
   StoreSettings,
 } from '@/types/delivery';
@@ -27,6 +28,11 @@ interface OrderDetailDrawerProps {
     status: OrderStatus,
     courierId?: string,
   ) => Promise<void>;
+  onUpdatePriority?: (
+    orderId: string,
+    priority: OrderPriority,
+    priorityReason?: string,
+  ) => Promise<void>;
 }
 
 export function OrderDetailDrawer({
@@ -35,10 +41,12 @@ export function OrderDetailDrawer({
   couriers,
   onClose,
   onUpdateStatus,
+  onUpdatePriority,
 }: OrderDetailDrawerProps) {
   const [selectedCourierId, setSelectedCourierId] = useState('');
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [confirmFinalize, setConfirmFinalize] = useState(false);
+  const [updatingPriority, setUpdatingPriority] = useState(false);
 
   useEffect(() => {
     if (order) {
@@ -96,6 +104,7 @@ export function OrderDetailDrawer({
             </h2>
             <p className={`mt-0.5 text-xs font-semibold ${statusMeta.textClass}`}>
               {statusMeta.label}
+              {order.priority === 'prioritario' ? ' · Prioridade Máxima Cozinha' : ''}
               {order.stockDeducted
                 ? ' · Estoque baixado automaticamente'
                 : order.status === 'cancelado'
@@ -158,6 +167,73 @@ export function OrderDetailDrawer({
               </div>
             )}
           </div>
+
+          {/* Kitchen Priority Control */}
+          {onUpdatePriority &&
+            order.status !== 'finalizado' &&
+            order.status !== 'cancelado' && (
+              <div
+                className={`p-3.5 rounded-xl border flex flex-wrap items-center justify-between gap-3 ${
+                  order.priority === 'prioritario'
+                    ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
+                    : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800'
+                }`}
+              >
+                <div className="min-w-0 space-y-0.5 text-xs">
+                  <p className="font-bold text-slate-900 dark:text-white inline-flex items-center gap-1.5">
+                    <Flame
+                      className={`w-4 h-4 ${
+                        order.priority === 'prioritario'
+                          ? 'text-red-600 dark:text-red-400'
+                          : 'text-slate-400'
+                      }`}
+                    />
+                    <span>
+                      {order.priority === 'prioritario'
+                        ? 'Pedido Prioritário Ativo'
+                        : 'Prioridade Normal na Fila'}
+                    </span>
+                  </p>
+                  {order.priority === 'prioritario' && order.priorityReason && (
+                    <p className="text-red-700 dark:text-red-300">
+                      Motivo: {order.priorityReason}
+                    </p>
+                  )}
+                  {order.priorityAcknowledgedAt && (
+                    <p className="font-mono-tabular text-emerald-700 dark:text-emerald-400">
+                      Cozinha ciente às {formatTimeBR(order.priorityAcknowledgedAt)} ({order.priorityAcknowledgedBy || 'Cozinha'})
+                    </p>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  disabled={updatingPriority}
+                  onClick={async () => {
+                    setUpdatingPriority(true);
+                    const nextPriority: OrderPriority =
+                      order.priority === 'prioritario' ? 'normal' : 'prioritario';
+                    await onUpdatePriority(
+                      order.id,
+                      nextPriority,
+                      nextPriority === 'prioritario'
+                        ? 'Elevado para prioritário pelo gestor'
+                        : undefined,
+                    );
+                    setUpdatingPriority(false);
+                  }}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap disabled:opacity-50 ${
+                    order.priority === 'prioritario'
+                      ? 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700'
+                      : 'bg-red-600 hover:bg-red-700 text-white'
+                  }`}
+                >
+                  {order.priority === 'prioritario'
+                    ? 'Voltar para Normal'
+                    : 'Alertar Cozinha (Prioritário)'}
+                </button>
+              </div>
+            )}
 
           {/* Courier Assignment when applicable */}
           {order.deliveryMode === 'entrega' &&

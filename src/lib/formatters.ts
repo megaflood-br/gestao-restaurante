@@ -8,6 +8,7 @@ import type {
   EmployeeStatus,
   LoyaltyPromotionType,
   LoyaltyRewardType,
+  OrderPriority,
   OrderSource,
   OrderStatus,
   PaymentMethod,
@@ -82,6 +83,11 @@ export const ORDER_STATUS_META: Record<
     label: 'Cancelado',
     textClass: 'text-red-700 dark:text-red-400',
   },
+};
+
+export const ORDER_PRIORITY_LABEL: Record<OrderPriority, string> = {
+  normal: 'Normal',
+  prioritario: 'Prioritário',
 };
 
 export const ORDER_SOURCE_LABEL: Record<OrderSource, string> = {

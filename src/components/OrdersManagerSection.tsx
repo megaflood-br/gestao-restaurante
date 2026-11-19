@@ -5,6 +5,7 @@ import {
   Bell,
   BellOff,
   Columns3,
+  Flame,
   List,
   Plus,
   Printer,
@@ -25,6 +26,7 @@ import type {
   CrmCustomer,
   DeliveryStoreState,
   Order,
+  OrderPriority,
   OrderStatus,
 } from '@/types/delivery';
 
@@ -37,6 +39,11 @@ interface OrdersManagerSectionProps {
     orderId: string,
     status: OrderStatus,
     courierId?: string,
+  ) => Promise<void>;
+  onUpdateOrderPriority?: (
+    orderId: string,
+    priority: OrderPriority,
+    priorityReason?: string,
   ) => Promise<void>;
 }
 
@@ -78,6 +85,7 @@ export function OrdersManagerSection({
   onClearPreselectedCustomer,
   onOrderCreated,
   onUpdateOrderStatus,
+  onUpdateOrderPriority,
 }: OrdersManagerSectionProps) {
   const [viewMode, setViewMode] = useState<'kanban' | 'lista'>('kanban');
   const [search, setSearch] = useState('');
@@ -108,19 +116,39 @@ export function OrdersManagerSection({
 
   const filteredOrders = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return state.orders.filter((order) => {
-      if (viewMode === 'lista' && statusFilter !== 'todos' && order.status !== statusFilter) {
-        return false;
-      }
-      if (!query) return true;
-      return (
-        String(order.orderNumber).includes(query) ||
-        order.customerName.toLowerCase().includes(query) ||
-        order.customerPhone.includes(query) ||
-        order.neighborhood.toLowerCase().includes(query)
-      );
-    });
+    return state.orders
+      .filter((order) => {
+        if (viewMode === 'lista' && statusFilter !== 'todos' && order.status !== statusFilter) {
+          return false;
+        }
+        if (!query) return true;
+        return (
+          String(order.orderNumber).includes(query) ||
+          order.customerName.toLowerCase().includes(query) ||
+          order.customerPhone.includes(query) ||
+          order.neighborhood.toLowerCase().includes(query)
+        );
+      })
+      .sort((a, b) => {
+        const aPrio =
+          a.priority === 'prioritario' &&
+          (a.status === 'pendente' || a.status === 'preparo')
+            ? 1
+            : 0;
+        const bPrio =
+          b.priority === 'prioritario' &&
+          (b.status === 'pendente' || b.status === 'preparo')
+            ? 1
+            : 0;
+        if (aPrio !== bPrio) return bPrio - aPrio;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
   }, [state.orders, viewMode, statusFilter, search]);
+
+  const activeSelectedOrder = useMemo(() => {
+    if (!selectedOrder) return null;
+    return state.orders.find((o) => o.id === selectedOrder.id) ?? selectedOrder;
+  }, [selectedOrder, state.orders]);
 
   const inPrepCount = state.orders.filter((o) => o.status === 'preparo').length;
   const inTransitCount = state.orders.filter(
@@ -348,19 +376,38 @@ export function OrdersManagerSection({
                         (c) => c.id === order.courierId,
                       );
 
+                      const isPriority = order.priority === 'prioritario';
                       return (
                         <article
                           key={order.id}
                           className={`bg-white dark:bg-slate-900 border rounded-lg p-3.5 space-y-2.5 ${
-                            order.status === 'pendente'
-                              ? 'border-amber-300 dark:border-amber-700'
-                              : 'border-slate-200 dark:border-slate-800'
+                            isPriority &&
+                            (order.status === 'pendente' ||
+                              order.status === 'preparo')
+                              ? 'border-red-300 dark:border-red-800 bg-red-50/40 dark:bg-red-950/15'
+                              : order.status === 'pendente'
+                                ? 'border-amber-300 dark:border-amber-700'
+                                : 'border-slate-200 dark:border-slate-800'
                           }`}
                         >
                           <div
                             onClick={() => setSelectedOrder(order)}
                             className="cursor-pointer space-y-1.5"
                           >
+                            {isPriority && (
+                              <div className="flex items-center justify-between gap-2 text-[11px] font-bold text-red-700 dark:text-red-300 uppercase tracking-wide">
+                                <span className="inline-flex items-center gap-1">
+                                  <Flame className="w-3.5 h-3.5" aria-hidden="true" />
+                                  <span>Prioritário</span>
+                                </span>
+                                {order.priorityAcknowledgedAt && (
+                                  <span className="font-mono-tabular font-semibold normal-case text-emerald-700 dark:text-emerald-400">
+                                    Ciente {formatTimeBR(order.priorityAcknowledgedAt)}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+
                             <div className="flex items-center justify-between gap-2 text-xs">
                               <span className="font-mono-tabular font-bold text-slate-900 dark:text-white">
                                 #{order.orderNumber}
@@ -373,6 +420,11 @@ export function OrdersManagerSection({
                             <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
                               {order.customerName}
                             </p>
+                            {isPriority && order.priorityReason && (
+                              <p className="text-[11px] font-medium text-red-700 dark:text-red-300 truncate">
+                                {order.priorityReason}
+                              </p>
+                            )}
 
                             <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                               {ORDER_SOURCE_LABEL[order.source]} ·{' '}
@@ -517,14 +569,27 @@ export function OrdersManagerSection({
                         className="hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer"
                       >
                         <td className="py-3 px-5 font-mono-tabular text-xs font-bold whitespace-nowrap">
-                          #{order.orderNumber}
+                          <div className="flex items-center gap-1.5">
+                            <span>#{order.orderNumber}</span>
+                            {order.priority === 'prioritario' && (
+                              <Flame
+                                className="w-3.5 h-3.5 text-red-600 dark:text-red-400"
+                                aria-label="Prioritário"
+                              />
+                            )}
+                          </div>
                           <div className="font-normal text-slate-500">
                             {formatTimeBR(order.createdAt)}
                           </div>
                         </td>
                         <td className="py-3 px-4 min-w-[200px]">
-                          <div className="font-medium text-slate-900 dark:text-white">
-                            {order.customerName}
+                          <div className="font-medium text-slate-900 dark:text-white flex items-center gap-2">
+                            <span>{order.customerName}</span>
+                            {order.priority === 'prioritario' && (
+                              <span className="text-[11px] font-bold text-red-700 dark:text-red-300 uppercase">
+                                Prioritário
+                              </span>
+                            )}
                           </div>
                           <div className="text-xs text-slate-500">
                             {ORDER_SOURCE_LABEL[order.source]} ·{' '}
@@ -633,11 +698,12 @@ export function OrdersManagerSection({
       />
 
       <OrderDetailDrawer
-        order={selectedOrder}
+        order={activeSelectedOrder}
         store={state.store}
         couriers={state.couriers}
         onClose={() => setSelectedOrder(null)}
         onUpdateStatus={onUpdateOrderStatus}
+        onUpdatePriority={onUpdateOrderPriority}
       />
     </div>
   );

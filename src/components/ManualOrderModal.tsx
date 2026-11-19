@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Award,
   Check,
+  Flame,
   Minus,
   Navigation,
   Plus,
@@ -28,6 +29,7 @@ import type {
   LoyaltyTransaction,
   Order,
   OrderItem,
+  OrderPriority,
   OrderSource,
   PaymentMethod,
   StockIngredient,
@@ -71,6 +73,8 @@ export function ManualOrderModal({
   const [address, setAddress] = useState('');
   const [neighborhood, setNeighborhood] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pix');
+  const [priority, setPriority] = useState<OrderPriority>('normal');
+  const [priorityReason, setPriorityReason] = useState('');
   const [notes, setNotes] = useState('');
   const [selectedRewardId, setSelectedRewardId] = useState<string>('');
   const [saveToCrm, setSaveToCrm] = useState(true);
@@ -275,6 +279,11 @@ export function ManualOrderModal({
           deliveryFee,
           loyaltyRewardId: selectedReward?.id,
           saveToCrm,
+          priority,
+          priorityReason:
+            priority === 'prioritario'
+              ? priorityReason.trim() || 'Pedido marcado como prioritário'
+              : undefined,
           notes,
           items: selectedItems,
         }),
@@ -314,6 +323,8 @@ export function ManualOrderModal({
       setCustomerPhone('');
       setAddress('');
       setNeighborhood('');
+      setPriority('normal');
+      setPriorityReason('');
       setNotes('');
       onClose();
     } catch {
@@ -847,6 +858,88 @@ export function ManualOrderModal({
                   className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
                 />
               </div>
+            </div>
+
+            {/* Kitchen Priority Selector */}
+            <div
+              className={`p-3.5 rounded-xl border space-y-2.5 ${
+                priority === 'prioritario'
+                  ? 'bg-red-50/70 dark:bg-red-950/30 border-red-300 dark:border-red-800'
+                  : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800'
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 inline-flex items-center gap-1.5">
+                  <Flame
+                    className={`w-4 h-4 ${
+                      priority === 'prioritario'
+                        ? 'text-red-600 dark:text-red-400'
+                        : 'text-slate-400'
+                    }`}
+                    aria-hidden="true"
+                  />
+                  <span>Prioridade na Cozinha</span>
+                </span>
+
+                <div className="inline-flex items-center gap-1 p-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => setPriority('normal')}
+                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${
+                      priority === 'normal'
+                        ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
+                        : 'text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    Normal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPriority('prioritario')}
+                    className={`inline-flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded-md transition-colors ${
+                      priority === 'prioritario'
+                        ? 'bg-red-600 text-white'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-red-600'
+                    }`}
+                  >
+                    <Flame className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Prioritário (Alerta Cozinha)</span>
+                  </button>
+                </div>
+              </div>
+
+              {priority === 'prioritario' && (
+                <div className="space-y-2 pt-1">
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      'Cliente aguardando no balcão',
+                      'Cliente VIP',
+                      'Reenvio / Atraso anterior',
+                      'Pedido grande / Evento',
+                    ].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setPriorityReason(preset)}
+                        className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
+                          priorityReason === preset
+                            ? 'bg-red-600 text-white border-red-600'
+                            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    id="man-priority-reason"
+                    value={priorityReason}
+                    onChange={(e) => setPriorityReason(e.target.value)}
+                    placeholder="Motivo da urgência para a cozinha (opcional)..."
+                    className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-900 border border-red-200 dark:border-red-800 rounded-lg"
+                  />
+                </div>
+              )}
             </div>
 
             {!matchedCustomer && (

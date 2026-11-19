@@ -7,6 +7,10 @@ import {
 } from '@/lib/evolution-client';
 import { generateBrendiBotReply } from '@/lib/whatsapp-bot';
 import { findCustomerByPhone } from '@/lib/crm-engine';
+import {
+  broadcastOrderEvent,
+  getActivePriorityOrders,
+} from '@/lib/realtime-bus';
 
 declare global {
   var __evolutionProcessedMessageIds: string[] | undefined;
@@ -209,6 +213,29 @@ export async function POST(request: NextRequest) {
     };
 
     db.whatsappLogs = [outboundLog, ...db.whatsappLogs];
+
+    if (botRes.createdOrder) {
+      const created = botRes.createdOrder;
+      const nowIso = new Date().toISOString();
+      const activePriorityOrders = getActivePriorityOrders(db.orders);
+      broadcastOrderEvent({
+        id: `evt-wa-create-${created.id}-${Date.now()}`,
+        type: 'order:created',
+        timestamp: nowIso,
+        order: created,
+        activePriorityOrders,
+      });
+      if (created.priority === 'prioritario') {
+        broadcastOrderEvent({
+          id: `evt-wa-prio-${created.id}-${Date.now()}`,
+          type: 'order:priority_alert',
+          timestamp: nowIso,
+          order: created,
+          activePriorityOrders,
+          message: `Novo pedido prioritário #${created.orderNumber} via WhatsApp (${created.customerName})`,
+        });
+      }
+    }
 
     return NextResponse.json({
       ok: true,

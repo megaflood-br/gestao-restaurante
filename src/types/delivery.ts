@@ -22,6 +22,8 @@ export type OrderStatus =
   | 'finalizado'
   | 'cancelado';
 
+export type OrderPriority = 'normal' | 'prioritario';
+
 export type OrderSource = 'cardapio' | 'whatsapp' | 'balcao';
 
 export type PaymentMethod =
@@ -249,6 +251,10 @@ export interface Order {
   discount: number;
   total: number;
   status: OrderStatus;
+  priority?: OrderPriority;
+  priorityReason?: string;
+  priorityAcknowledgedAt?: string;
+  priorityAcknowledgedBy?: string;
   courierId?: string;
   customerId?: string;
   loyaltyRewardId?: string;
