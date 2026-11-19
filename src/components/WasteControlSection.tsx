@@ -23,6 +23,7 @@ import {
   getCompatibleUnits,
   previewWasteDeduction,
 } from '@/lib/stock-engine';
+import { KitchenWasteAnalyticsSection } from '@/components/KitchenWasteAnalyticsSection';
 import type {
   DeliveryStoreState,
   StockUnit,
@@ -362,6 +363,14 @@ export function WasteControlSection({
           </p>
         </div>
       </section>
+
+      {/* Recharts Visual Analytics: Weekday + Item Category */}
+      <KitchenWasteAnalyticsSection
+        wasteLogs={wasteLogs}
+        ingredients={state.ingredients}
+        menuItems={state.menuItems}
+        categories={state.categories ?? []}
+      />
 
       {feedback && (
         <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs font-medium text-emerald-800 dark:text-emerald-300 flex items-center justify-between gap-3">

@@ -30,6 +30,7 @@ import {
   previewWasteDeduction,
 } from '@/lib/stock-engine';
 import { KitchenPriorityAlertBar } from '@/components/KitchenPriorityAlertBar';
+import { KitchenWasteAnalyticsSection } from '@/components/KitchenWasteAnalyticsSection';
 import { useKitchenRealtime } from '@/lib/use-kitchen-realtime';
 import type {
   ChecklistRun,
@@ -55,6 +56,12 @@ const REASON_OPTIONS: WasteReason[] = [
 ];
 
 function hydrateState(parsed: DeliveryStoreState): DeliveryStoreState {
+  const parsedWaste = Array.isArray(parsed.wasteLogs)
+    ? parsed.wasteLogs
+    : INITIAL_DELIVERY_STATE.wasteLogs;
+  const shouldUpgradeSeedWaste =
+    parsedWaste.length === 1 && parsedWaste[0]?.id === 'waste-seed-1';
+
   return {
     ...INITIAL_DELIVERY_STATE,
     ...parsed,
@@ -62,6 +69,14 @@ function hydrateState(parsed: DeliveryStoreState): DeliveryStoreState {
       ...INITIAL_DELIVERY_STATE.store,
       ...parsed.store,
     },
+    categories:
+      Array.isArray(parsed.categories) && parsed.categories.length > 0
+        ? parsed.categories
+        : INITIAL_DELIVERY_STATE.categories,
+    menuItems:
+      Array.isArray(parsed.menuItems) && parsed.menuItems.length > 0
+        ? parsed.menuItems
+        : INITIAL_DELIVERY_STATE.menuItems,
     ingredients:
       Array.isArray(parsed.ingredients) && parsed.ingredients.length > 0
         ? parsed.ingredients
@@ -77,9 +92,9 @@ function hydrateState(parsed: DeliveryStoreState): DeliveryStoreState {
     checklistRuns: Array.isArray(parsed.checklistRuns)
       ? parsed.checklistRuns
       : INITIAL_DELIVERY_STATE.checklistRuns,
-    wasteLogs: Array.isArray(parsed.wasteLogs)
-      ? parsed.wasteLogs
-      : INITIAL_DELIVERY_STATE.wasteLogs,
+    wasteLogs: shouldUpgradeSeedWaste
+      ? INITIAL_DELIVERY_STATE.wasteLogs
+      : parsedWaste,
     orders: Array.isArray(parsed.orders)
       ? parsed.orders
       : INITIAL_DELIVERY_STATE.orders,
@@ -412,7 +427,7 @@ export function KitchenWastePortalPage() {
   return (
     <div className="min-h-screen bg-[#f7f7f9] dark:bg-[#0c0d11] text-slate-900 dark:text-slate-100">
       <header className="sticky top-0 z-20 bg-white/95 dark:bg-[#13151c]/95 backdrop-blur border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 py-3">
-        <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             {state.store.logoImage && !logoFailed ? (
               <img
@@ -464,7 +479,7 @@ export function KitchenWastePortalPage() {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto p-4 sm:p-6 space-y-5">
+      <main className="max-w-5xl mx-auto p-4 sm:p-6 space-y-5">
         <KitchenPriorityAlertBar
           connectionStatus={realtime.connectionStatus}
           activePriorityOrders={realtime.activePriorityOrders}
@@ -948,6 +963,15 @@ export function KitchenWastePortalPage() {
             )}
           </section>
         )}
+
+        {/* Kitchen Waste Visual Analytics (Weekday + Item Category) */}
+        <KitchenWasteAnalyticsSection
+          wasteLogs={state.wasteLogs ?? []}
+          ingredients={state.ingredients}
+          menuItems={state.menuItems}
+          categories={state.categories ?? []}
+          onLogFirstWaste={() => setActiveTab('desperdicio')}
+        />
       </main>
     </div>
   );

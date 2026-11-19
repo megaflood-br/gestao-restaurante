@@ -104,6 +104,7 @@ export async function POST(request: NextRequest) {
         checklistRuns: db.checklistRuns,
         ingredients: db.ingredients,
         menuItems: db.menuItems,
+        categories: db.categories,
         stockMovements: db.stockMovements,
         wasteLogs: db.wasteLogs,
       });

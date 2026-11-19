@@ -51,6 +51,7 @@ import {
   previewWasteDeduction,
 } from '@/lib/stock-engine';
 import { KitchenPriorityAlertBar } from '@/components/KitchenPriorityAlertBar';
+import { KitchenWasteAnalyticsSection } from '@/components/KitchenWasteAnalyticsSection';
 import { useKitchenRealtime } from '@/lib/use-kitchen-realtime';
 import type {
   ChecklistRole,
@@ -59,6 +60,7 @@ import type {
   DeliveryStoreState,
   Employee,
   EmployeeLedgerEntry,
+  MenuCategory,
   MenuItem,
   StaffTask,
   StaffTaskStatus,
@@ -75,6 +77,12 @@ const STAFF_ID_KEY = 'casa-tempero-staff-id';
 const STAFF_PHONE_KEY = 'casa-tempero-staff-phone';
 
 function hydrateState(parsed: DeliveryStoreState): DeliveryStoreState {
+  const parsedWaste = Array.isArray(parsed.wasteLogs)
+    ? parsed.wasteLogs
+    : INITIAL_DELIVERY_STATE.wasteLogs;
+  const shouldUpgradeSeedWaste =
+    parsedWaste.length === 1 && parsedWaste[0]?.id === 'waste-seed-1';
+
   return {
     ...INITIAL_DELIVERY_STATE,
     ...parsed,
@@ -82,6 +90,10 @@ function hydrateState(parsed: DeliveryStoreState): DeliveryStoreState {
       ...INITIAL_DELIVERY_STATE.store,
       ...parsed.store,
     },
+    categories:
+      Array.isArray(parsed.categories) && parsed.categories.length > 0
+        ? parsed.categories
+        : INITIAL_DELIVERY_STATE.categories,
     checklistTemplates:
       Array.isArray(parsed.checklistTemplates) &&
       parsed.checklistTemplates.length > 0
@@ -101,9 +113,9 @@ function hydrateState(parsed: DeliveryStoreState): DeliveryStoreState {
     stockMovements: Array.isArray(parsed.stockMovements)
       ? parsed.stockMovements
       : INITIAL_DELIVERY_STATE.stockMovements,
-    wasteLogs: Array.isArray(parsed.wasteLogs)
-      ? parsed.wasteLogs
-      : INITIAL_DELIVERY_STATE.wasteLogs,
+    wasteLogs: shouldUpgradeSeedWaste
+      ? INITIAL_DELIVERY_STATE.wasteLogs
+      : parsedWaste,
     employees: Array.isArray(parsed.employees)
       ? parsed.employees
       : INITIAL_DELIVERY_STATE.employees,
@@ -189,6 +201,7 @@ export function StaffPortalPage() {
         checklistRuns?: ChecklistRun[];
         ingredients?: StockIngredient[];
         menuItems?: MenuItem[];
+        categories?: MenuCategory[];
         stockMovements?: StockMovement[];
         wasteLogs?: WasteLog[];
       };
@@ -209,6 +222,7 @@ export function StaffPortalPage() {
           checklistRuns: data.checklistRuns ?? prev.checklistRuns,
           ingredients: data.ingredients ?? prev.ingredients,
           menuItems: data.menuItems ?? prev.menuItems,
+          categories: data.categories ?? prev.categories,
           stockMovements: data.stockMovements ?? prev.stockMovements,
           wasteLogs: data.wasteLogs ?? prev.wasteLogs,
         }));
@@ -376,6 +390,7 @@ export function StaffPortalPage() {
         checklistRuns?: ChecklistRun[];
         ingredients?: StockIngredient[];
         menuItems?: MenuItem[];
+        categories?: MenuCategory[];
         stockMovements?: StockMovement[];
         wasteLogs?: WasteLog[];
       };
@@ -405,6 +420,7 @@ export function StaffPortalPage() {
         checklistRuns: data.checklistRuns ?? prev.checklistRuns,
         ingredients: data.ingredients ?? prev.ingredients,
         menuItems: data.menuItems ?? prev.menuItems,
+        categories: data.categories ?? prev.categories,
         stockMovements: data.stockMovements ?? prev.stockMovements,
         wasteLogs: data.wasteLogs ?? prev.wasteLogs,
       }));
@@ -801,7 +817,7 @@ export function StaffPortalPage() {
   return (
     <div className="min-h-screen bg-[#f7f7f9] dark:bg-[#0c0d11] text-slate-900 dark:text-slate-100">
       <header className="sticky top-0 z-20 bg-white/95 dark:bg-[#13151c]/95 backdrop-blur border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 py-3">
-        <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             {state.store.logoImage && !logoFailed ? (
               <img
@@ -855,7 +871,7 @@ export function StaffPortalPage() {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto p-4 sm:p-6 space-y-5">
+      <main className="max-w-5xl mx-auto p-4 sm:p-6 space-y-5">
         {!loggedEmployee ? (
           <section className="max-w-md mx-auto mt-4 sm:mt-8 bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-6 sm:p-7 space-y-5">
             <div className="space-y-1.5">
@@ -1709,6 +1725,13 @@ export function StaffPortalPage() {
                         ))
                       )}
                     </div>
+
+                    <KitchenWasteAnalyticsSection
+                      wasteLogs={state.wasteLogs ?? []}
+                      ingredients={state.ingredients}
+                      menuItems={state.menuItems}
+                      categories={state.categories ?? []}
+                    />
                   </section>
                 ) : (
                   <section className="space-y-4">
