@@ -6,9 +6,12 @@ import {
   Bot,
   Check,
   CheckCircle2,
+  ChefHat,
   Clock,
   Copy,
+  DollarSign,
   ExternalLink,
+  Image as ImageIcon,
   KeyRound,
   Link2,
   MapPin,
@@ -25,6 +28,7 @@ import {
   Store,
   Trash2,
   Upload,
+  Users,
 } from 'lucide-react';
 import { formatCurrencyBRL, formatTimeBR } from '@/lib/formatters';
 import { readAndCompressImage } from '@/lib/image-upload';
@@ -46,7 +50,15 @@ import type {
   StoreSettings,
 } from '@/types/delivery';
 
-export type SettingsTabId = 'loja' | 'ia' | 'whatsapp' | 'apis';
+export type SettingsTabId =
+  | 'loja'
+  | 'horarios'
+  | 'entrega'
+  | 'visual'
+  | 'links'
+  | 'ia'
+  | 'whatsapp'
+  | 'apis';
 
 interface SettingsSectionProps {
   state: DeliveryStoreState;
@@ -78,35 +90,72 @@ const COVER_PRESETS = [
   },
 ];
 
-const SETTINGS_TABS: Array<{
-  id: SettingsTabId;
-  label: string;
-  description: string;
-  icon: typeof Store;
+const SETTINGS_TAB_GROUPS: Array<{
+  groupLabel: string;
+  tabs: Array<{
+    id: SettingsTabId;
+    label: string;
+    description: string;
+    icon: typeof Store;
+  }>;
 }> = [
   {
-    id: 'loja',
-    label: 'Loja e Entrega',
-    description: 'Horários, endereço, taxas e frete grátis',
-    icon: Store,
+    groupLabel: 'Loja e Entrega',
+    tabs: [
+      {
+        id: 'loja',
+        label: 'Dados da Loja',
+        description: 'Nome, endereço, contato e status',
+        icon: Store,
+      },
+      {
+        id: 'horarios',
+        label: 'Horários',
+        description: 'Dias, turnos e fechamento automático',
+        icon: Clock,
+      },
+      {
+        id: 'entrega',
+        label: 'Taxas e Entrega',
+        description: 'Frete grátis, km, bairros e simulador',
+        icon: DollarSign,
+      },
+      {
+        id: 'visual',
+        label: 'Visual e Marca',
+        description: 'Logo, capa do cardápio e prévia',
+        icon: ImageIcon,
+      },
+      {
+        id: 'links',
+        label: 'Links e Portais',
+        description: 'Cardápio do cliente e portais internos',
+        icon: Link2,
+      },
+    ],
   },
   {
-    id: 'ia',
-    label: 'Atendente Virtual IA',
-    description: 'Personalidade, tom de voz e regras de venda',
-    icon: Sparkles,
-  },
-  {
-    id: 'whatsapp',
-    label: 'WhatsApp & Anti-Ban',
-    description: 'QR Code, delay de digitação, opt-out e avisos',
-    icon: Smartphone,
-  },
-  {
-    id: 'apis',
-    label: 'Credenciais e APIs',
-    description: 'Chaves OpenAI e servidor Evolution API v2',
-    icon: KeyRound,
+    groupLabel: 'IA, WhatsApp e APIs',
+    tabs: [
+      {
+        id: 'ia',
+        label: 'Atendente Virtual IA',
+        description: 'Personalidade, tom de voz e regras',
+        icon: Sparkles,
+      },
+      {
+        id: 'whatsapp',
+        label: 'WhatsApp & Anti-Ban',
+        description: 'QR Code, delay, opt-out e avisos',
+        icon: Smartphone,
+      },
+      {
+        id: 'apis',
+        label: 'Credenciais e APIs',
+        description: 'Chaves OpenAI, Maps e Evolution API',
+        icon: KeyRound,
+      },
+    ],
   },
 ];
 
@@ -201,8 +250,7 @@ export function SettingsSection({
   const [uploadingCover, setUploadingCover] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [origin, setOrigin] = useState('');
-  const [copiedCustomerLink, setCopiedCustomerLink] = useState(false);
-  const [copiedCourierLink, setCopiedCourierLink] = useState(false);
+  const [copiedLinkKey, setCopiedLinkKey] = useState<string | null>(null);
   const [savingStore, setSavingStore] = useState(false);
 
   // Distance fee simulator state
@@ -368,7 +416,10 @@ export function SettingsSection({
       .catch(() => {});
   }, []);
 
-  const handleSaveStore = async (e: React.FormEvent) => {
+  const handleSaveStore = async (
+    e: React.FormEvent,
+    sectorLabel = 'Loja e entrega',
+  ) => {
     e.preventDefault();
     setSavingStore(true);
     setFeedback(null);
@@ -425,7 +476,7 @@ export function SettingsSection({
       setNeighborhoodFees(cleanedNeighborhoods);
       setFeedback({
         type: 'ok',
-        message: 'Logo, dados da loja, horário de funcionamento e taxas salvos com sucesso.',
+        message: `Configurações de "${sectorLabel}" salvas com sucesso.`,
       });
     } finally {
       setSavingStore(false);
@@ -604,24 +655,18 @@ export function SettingsSection({
 
   const customerMenuUrl = origin ? `${origin}/cardapio` : '/cardapio';
   const courierPortalUrl = origin ? `${origin}/motoboy` : '/motoboy';
+  const kitchenPortalUrl = origin ? `${origin}/cozinha` : '/cozinha';
+  const staffPortalUrl = origin ? `${origin}/equipe` : '/equipe';
 
-  const handleCopyCustomerLink = async () => {
+  const handleCopyPortalLink = async (key: string, url: string) => {
     try {
-      await navigator.clipboard.writeText(customerMenuUrl);
-      setCopiedCustomerLink(true);
-      setTimeout(() => setCopiedCustomerLink(false), 2500);
+      await navigator.clipboard.writeText(url);
+      setCopiedLinkKey(key);
+      setTimeout(() => {
+        setCopiedLinkKey((prev) => (prev === key ? null : prev));
+      }, 2400);
     } catch {
       // Fallback ignored in restricted frames
-    }
-  };
-
-  const handleCopyCourierLink = async () => {
-    try {
-      await navigator.clipboard.writeText(courierPortalUrl);
-      setCopiedCourierLink(true);
-      setTimeout(() => setCopiedCourierLink(false), 2500);
-    } catch {
-      // Fallback ignored
     }
   };
 
@@ -851,7 +896,7 @@ export function SettingsSection({
             Configurações do Sistema
           </h1>
           <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-            Centralize dados da loja, taxas de entrega, regras da atendente IA, proteção anti-ban e chaves de API em um só lugar.
+            Configure cada setor separadamente: dados da loja, horários, taxas de entrega, identidade visual, links, atendente IA e APIs.
           </p>
         </div>
 
@@ -879,816 +924,936 @@ export function SettingsSection({
         </div>
       )}
 
-      {/* Unified Settings Layout: Left Rail + Active Panel */}
+      {/* Unified Settings Layout: Grouped Left Rail + Active Sector Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Settings Navigation Rail */}
-        <aside className="lg:col-span-3 bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-2 flex lg:flex-col gap-1 overflow-x-auto">
-          {SETTINGS_TABS.map((tab) => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-start gap-3 px-3.5 py-3 rounded-lg text-left transition-colors shrink-0 lg:w-full ${
-                  active
-                    ? 'bg-brand-50 text-brand-900 dark:bg-brand-950/50 dark:text-brand-100'
-                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <Icon
-                  className={`w-4 h-4 mt-0.5 shrink-0 ${
-                    active ? 'text-brand-600 dark:text-brand-400' : ''
-                  }`}
-                  aria-hidden="true"
-                />
-                <div className="min-w-0">
-                  <p className="text-xs font-bold whitespace-nowrap">{tab.label}</p>
-                  <p className="hidden lg:block mt-0.5 text-[11px] opacity-80 leading-snug">
-                    {tab.description}
-                  </p>
-                </div>
-              </button>
-            );
-          })}
+        <aside className="lg:col-span-3 bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-2 flex lg:flex-col gap-1 lg:gap-3 overflow-x-auto">
+          {SETTINGS_TAB_GROUPS.map((group, groupIdx) => (
+            <div
+              key={group.groupLabel}
+              className={`flex lg:flex-col gap-1 shrink-0 lg:w-full ${
+                groupIdx > 0
+                  ? 'lg:pt-3 lg:border-t lg:border-slate-100 dark:lg:border-slate-800'
+                  : ''
+              }`}
+            >
+              <p className="hidden lg:block px-3 pt-1 pb-0.5 text-[11px] font-semibold text-slate-400 dark:text-slate-500">
+                {group.groupLabel}
+              </p>
+              {group.tabs.map((tab) => {
+                const Icon = tab.icon;
+                const active = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-start gap-3 px-3.5 py-2.5 rounded-lg text-left transition-colors shrink-0 lg:w-full ${
+                      active
+                        ? 'bg-brand-50 text-brand-900 dark:bg-brand-950/50 dark:text-brand-100'
+                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <Icon
+                      className={`w-4 h-4 mt-0.5 shrink-0 ${
+                        active ? 'text-brand-600 dark:text-brand-400' : ''
+                      }`}
+                      aria-hidden="true"
+                    />
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold whitespace-nowrap">{tab.label}</p>
+                      <p className="hidden lg:block mt-0.5 text-[11px] opacity-80 leading-snug">
+                        {tab.description}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </aside>
 
         {/* Active Configuration Content */}
         <div className="lg:col-span-9 space-y-6">
-          {/* TAB 1: LOJA & ENTREGA */}
+          {/* SECTOR 1: DADOS DA LOJA */}
           {activeTab === 'loja' && (
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-              <section className="xl:col-span-8 bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-                <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-4">
-                  <div>
-                    <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                      Perfil da Loja e Regras de Entrega
-                    </h2>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Exibido no Cardápio Online e utilizado pela {assistantName || 'Brenda'} no WhatsApp.
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={onToggleStoreOpen}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
-                      store.isOpen
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800'
-                        : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800'
-                    }`}
-                  >
-                    {store.isOpen ? 'Operação Liberada' : 'Pausa Manual Ativa'}
-                  </button>
+            <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+              <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                    Dados Gerais da Loja
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Identificação, endereço de retirada e status operacional exibidos no Cardápio Online e pela {assistantName || 'Brenda'}.
+                  </p>
                 </div>
 
-                <form onSubmit={handleSaveStore} className="p-6 space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label
-                        htmlFor="cfg-store-name"
-                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-                      >
-                        Nome do Estabelecimento
-                      </label>
-                      <input
-                        id="cfg-store-name"
-                        required
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-                      />
-                    </div>
-                    <div>
-                      <label
-                        htmlFor="cfg-store-segment"
-                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-                      >
-                        Especialidade / Segmento
-                      </label>
-                      <input
-                        id="cfg-store-segment"
-                        value={segment}
-                        onChange={(e) => setSegment(e.target.value)}
-                        className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-                      />
-                    </div>
-                  </div>
+                <button
+                  type="button"
+                  onClick={onToggleStoreOpen}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
+                    store.isOpen
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800'
+                      : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-950/50 dark:text-red-300 dark:border-red-800'
+                  }`}
+                >
+                  {store.isOpen ? 'Operação Liberada' : 'Pausa Manual Ativa'}
+                </button>
+              </div>
 
+              <form
+                onSubmit={(e) => handleSaveStore(e, 'Dados da Loja')}
+                className="p-6 space-y-5"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label
-                      htmlFor="cfg-store-desc"
+                      htmlFor="cfg-store-name"
                       className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
                     >
-                      Descrição Curta da Vitrine
+                      Nome do Estabelecimento
                     </label>
-                    <textarea
-                      id="cfg-store-desc"
-                      rows={2}
-                      value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    <input
+                      id="cfg-store-name"
+                      required
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
                     />
                   </div>
+                  <div>
+                    <label
+                      htmlFor="cfg-store-segment"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      Especialidade / Segmento
+                    </label>
+                    <input
+                      id="cfg-store-segment"
+                      value={segment}
+                      onChange={(e) => setSegment(e.target.value)}
+                      className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    />
+                  </div>
+                </div>
 
-                  <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3.5">
-                    {(() => {
-                      const previewShifts: StoreHourShift[] = [
-                        { open: shift1Open, close: shift1Close },
-                      ];
-                      if (shift2Enabled && shift2Open && shift2Close) {
-                        previewShifts.push({ open: shift2Open, close: shift2Close });
-                      }
-                      const livePreview = getStoreAvailability({
-                        isOpen: store.isOpen,
-                        openingHours,
-                        autoScheduleEnabled,
-                        timezone: store.timezone || 'America/Sao_Paulo',
-                        openingSchedule: {
-                          days: scheduleDays,
-                          shifts: previewShifts,
-                        },
-                      });
-                      return (
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                          <div>
-                            <p className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                              <Clock className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" aria-hidden="true" />
-                              <span>Horário de Funcionamento Automático</span>
-                            </p>
-                            <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                              Agora são <strong className="font-mono-tabular">{livePreview.currentTimeLabel}</strong> (Brasília) · Status no cardápio:{' '}
-                              <strong
-                                className={
-                                  livePreview.isOpen
-                                    ? 'text-emerald-700 dark:text-emerald-400'
-                                    : 'text-red-700 dark:text-red-400'
-                                }
-                              >
-                                {livePreview.statusLabel}
-                              </strong>
-                            </p>
-                          </div>
+                <div>
+                  <label
+                    htmlFor="cfg-store-desc"
+                    className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                  >
+                    Descrição Curta da Vitrine
+                  </label>
+                  <textarea
+                    id="cfg-store-desc"
+                    rows={2}
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    className="w-full px-3 py-2 text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                  />
+                </div>
 
-                          <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer shrink-0">
-                            <input
-                              type="checkbox"
-                              checked={autoScheduleEnabled}
-                              onChange={(e) => setAutoScheduleEnabled(e.target.checked)}
-                              className="accent-brand-600 w-4 h-4"
-                            />
-                            <span>Fechar fora do horário</span>
-                          </label>
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label
+                      htmlFor="cfg-store-phone"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      WhatsApp de Contato
+                    </label>
+                    <input
+                      id="cfg-store-phone"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="cfg-store-address"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      Endereço da Cozinha (Retirada)
+                    </label>
+                    <input
+                      id="cfg-store-address"
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="cfg-store-neighborhood"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      Bairro / Cidade
+                    </label>
+                    <input
+                      id="cfg-store-neighborhood"
+                      value={neighborhood}
+                      onChange={(e) => setNeighborhood(e.target.value)}
+                      className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={savingStore}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg disabled:opacity-60 whitespace-nowrap"
+                  >
+                    <Save className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>{savingStore ? 'Salvando...' : 'Salvar Dados da Loja'}</span>
+                  </button>
+                </div>
+              </form>
+            </section>
+          )}
+
+          {/* SECTOR 2: HORÁRIOS DE FUNCIONAMENTO */}
+          {activeTab === 'horarios' && (
+            <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+              <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                  Horários e Turnos de Funcionamento
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Controle automático de abertura e fechamento no fuso de Brasília, dias de atendimento e texto exibido aos clientes.
+                </p>
+              </div>
+
+              <form
+                onSubmit={(e) => handleSaveStore(e, 'Horários')}
+                className="p-6 space-y-5"
+              >
+                <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-4">
+                  {(() => {
+                    const previewShifts: StoreHourShift[] = [
+                      { open: shift1Open, close: shift1Close },
+                    ];
+                    if (shift2Enabled && shift2Open && shift2Close) {
+                      previewShifts.push({ open: shift2Open, close: shift2Close });
+                    }
+                    const livePreview = getStoreAvailability({
+                      isOpen: store.isOpen,
+                      openingHours,
+                      autoScheduleEnabled,
+                      timezone: store.timezone || 'America/Sao_Paulo',
+                      openingSchedule: {
+                        days: scheduleDays,
+                        shifts: previewShifts,
+                      },
+                    });
+                    return (
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                            <span>Horário de Funcionamento Automático</span>
+                          </p>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            Agora são <strong className="font-mono-tabular">{livePreview.currentTimeLabel}</strong> (Brasília) · Status no cardápio:{' '}
+                            <strong
+                              className={
+                                livePreview.isOpen
+                                  ? 'text-emerald-700 dark:text-emerald-400'
+                                  : 'text-red-700 dark:text-red-400'
+                              }
+                            >
+                              {livePreview.statusLabel}
+                            </strong>
+                          </p>
                         </div>
-                      );
-                    })()}
 
-                    <div>
-                      <p className="text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1.5">
-                        Dias de atendimento
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {WEEKDAY_OPTIONS.map((opt) => {
-                          const active = scheduleDays.includes(opt.day);
-                          return (
-                            <button
-                              key={opt.day}
-                              type="button"
-                              onClick={() => {
-                                const nextDays = active
-                                  ? scheduleDays.filter((d) => d !== opt.day)
-                                  : [...scheduleDays, opt.day].sort((a, b) => a - b);
-                                setScheduleDays(nextDays);
-                                syncScheduleText(
-                                  nextDays,
-                                  shift1Open,
-                                  shift1Close,
-                                  shift2Enabled,
-                                  shift2Open,
-                                  shift2Close,
-                                );
-                              }}
-                              className={`px-2.5 py-1 text-xs font-semibold rounded-md border transition-colors ${
-                                active
-                                  ? 'bg-brand-600 text-white border-brand-600'
-                                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'
-                              }`}
-                            >
-                              {opt.short}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
-                      <div>
-                        <label
-                          htmlFor="cfg-shift1-open"
-                          className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1"
-                        >
-                          Abre (1º Turno)
+                        <label className="inline-flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={autoScheduleEnabled}
+                            onChange={(e) => setAutoScheduleEnabled(e.target.checked)}
+                            className="accent-brand-600 w-4 h-4"
+                          />
+                          <span>Fechar fora do horário</span>
                         </label>
-                        <input
-                          id="cfg-shift1-open"
-                          type="time"
-                          value={shift1Open}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setShift1Open(v);
-                            syncScheduleText(
-                              scheduleDays,
-                              v,
-                              shift1Close,
-                              shift2Enabled,
-                              shift2Open,
-                              shift2Close,
-                            );
-                          }}
-                          className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
-                        />
                       </div>
-                      <div>
-                        <label
-                          htmlFor="cfg-shift1-close"
-                          className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1"
-                        >
-                          Fecha (1º Turno)
-                        </label>
-                        <input
-                          id="cfg-shift1-close"
-                          type="time"
-                          value={shift1Close}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setShift1Close(v);
-                            syncScheduleText(
-                              scheduleDays,
-                              shift1Open,
-                              v,
-                              shift2Enabled,
-                              shift2Open,
-                              shift2Close,
-                            );
-                          }}
-                          className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
-                        />
-                      </div>
+                    );
+                  })()}
 
-                      {shift2Enabled ? (
-                        <>
-                          <div>
-                            <label
-                              htmlFor="cfg-shift2-open"
-                              className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1"
-                            >
-                              Abre (2º Turno)
-                            </label>
-                            <input
-                              id="cfg-shift2-open"
-                              type="time"
-                              value={shift2Open}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setShift2Open(v);
-                                syncScheduleText(
-                                  scheduleDays,
-                                  shift1Open,
-                                  shift1Close,
-                                  true,
-                                  v,
-                                  shift2Close,
-                                );
-                              }}
-                              className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
-                            />
-                          </div>
-                          <div>
-                            <div className="flex items-center justify-between mb-1">
-                              <label
-                                htmlFor="cfg-shift2-close"
-                                className="text-[11px] font-medium text-slate-600 dark:text-slate-400"
-                              >
-                                Fecha (2º Turno)
-                              </label>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setShift2Enabled(false);
-                                  syncScheduleText(
-                                    scheduleDays,
-                                    shift1Open,
-                                    shift1Close,
-                                    false,
-                                    shift2Open,
-                                    shift2Close,
-                                  );
-                                }}
-                                className="text-[10px] text-red-600 hover:underline"
-                              >
-                                Remover
-                              </button>
-                            </div>
-                            <input
-                              id="cfg-shift2-close"
-                              type="time"
-                              value={shift2Close}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setShift2Close(v);
-                                syncScheduleText(
-                                  scheduleDays,
-                                  shift1Open,
-                                  shift1Close,
-                                  true,
-                                  shift2Open,
-                                  v,
-                                );
-                              }}
-                              className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
-                            />
-                          </div>
-                        </>
-                      ) : (
-                        <div className="col-span-2">
+                  <div>
+                    <p className="text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1.5">
+                      Dias de atendimento
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {WEEKDAY_OPTIONS.map((opt) => {
+                        const active = scheduleDays.includes(opt.day);
+                        return (
                           <button
+                            key={opt.day}
                             type="button"
                             onClick={() => {
-                              setShift2Enabled(true);
+                              const nextDays = active
+                                ? scheduleDays.filter((d) => d !== opt.day)
+                                : [...scheduleDays, opt.day].sort((a, b) => a - b);
+                              setScheduleDays(nextDays);
+                              syncScheduleText(
+                                nextDays,
+                                shift1Open,
+                                shift1Close,
+                                shift2Enabled,
+                                shift2Open,
+                                shift2Close,
+                              );
+                            }}
+                            className={`px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors ${
+                              active
+                                ? 'bg-brand-600 text-white border-brand-600'
+                                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'
+                            }`}
+                          >
+                            {opt.short}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
+                    <div>
+                      <label
+                        htmlFor="cfg-shift1-open"
+                        className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1"
+                      >
+                        Abre (1º Turno)
+                      </label>
+                      <input
+                        id="cfg-shift1-open"
+                        type="time"
+                        value={shift1Open}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setShift1Open(v);
+                          syncScheduleText(
+                            scheduleDays,
+                            v,
+                            shift1Close,
+                            shift2Enabled,
+                            shift2Open,
+                            shift2Close,
+                          );
+                        }}
+                        className="w-full px-2.5 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="cfg-shift1-close"
+                        className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1"
+                      >
+                        Fecha (1º Turno)
+                      </label>
+                      <input
+                        id="cfg-shift1-close"
+                        type="time"
+                        value={shift1Close}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setShift1Close(v);
+                          syncScheduleText(
+                            scheduleDays,
+                            shift1Open,
+                            v,
+                            shift2Enabled,
+                            shift2Open,
+                            shift2Close,
+                          );
+                        }}
+                        className="w-full px-2.5 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                      />
+                    </div>
+
+                    {shift2Enabled ? (
+                      <>
+                        <div>
+                          <label
+                            htmlFor="cfg-shift2-open"
+                            className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1"
+                          >
+                            Abre (2º Turno)
+                          </label>
+                          <input
+                            id="cfg-shift2-open"
+                            type="time"
+                            value={shift2Open}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setShift2Open(v);
+                              syncScheduleText(
+                                scheduleDays,
+                                shift1Open,
+                                shift1Close,
+                                true,
+                                v,
+                                shift2Close,
+                              );
+                            }}
+                            className="w-full px-2.5 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                          />
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label
+                              htmlFor="cfg-shift2-close"
+                              className="text-[11px] font-medium text-slate-600 dark:text-slate-400"
+                            >
+                              Fecha (2º Turno)
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShift2Enabled(false);
+                                syncScheduleText(
+                                  scheduleDays,
+                                  shift1Open,
+                                  shift1Close,
+                                  false,
+                                  shift2Open,
+                                  shift2Close,
+                                );
+                              }}
+                              className="text-[10px] text-red-600 hover:underline"
+                            >
+                              Remover
+                            </button>
+                          </div>
+                          <input
+                            id="cfg-shift2-close"
+                            type="time"
+                            value={shift2Close}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setShift2Close(v);
                               syncScheduleText(
                                 scheduleDays,
                                 shift1Open,
                                 shift1Close,
                                 true,
                                 shift2Open,
-                                shift2Close,
+                                v,
                               );
                             }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-slate-900 border border-brand-200 dark:border-brand-800 hover:bg-brand-50 rounded-lg"
+                            className="w-full px-2.5 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <div className="col-span-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShift2Enabled(true);
+                            syncScheduleText(
+                              scheduleDays,
+                              shift1Open,
+                              shift1Close,
+                              true,
+                              shift2Open,
+                              shift2Close,
+                            );
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-slate-900 border border-brand-200 dark:border-brand-800 hover:bg-brand-50 rounded-lg"
+                        >
+                          <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>Adicionar 2º turno (ex.: Jantar)</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="cfg-store-hours"
+                    className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                  >
+                    Texto Exibido no Cardápio
+                  </label>
+                  <input
+                    id="cfg-store-hours"
+                    value={openingHours}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setOpeningHours(val);
+                      const parsed = parseOpeningHoursString(val);
+                      if (parsed) {
+                        setScheduleDays(parsed.days);
+                        setShift1Open(parsed.shifts[0]?.open ?? shift1Open);
+                        setShift1Close(parsed.shifts[0]?.close ?? shift1Close);
+                        if (parsed.shifts.length > 1) {
+                          setShift2Enabled(true);
+                          setShift2Open(parsed.shifts[1].open);
+                          setShift2Close(parsed.shifts[1].close);
+                        } else {
+                          setShift2Enabled(false);
+                        }
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                  />
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={savingStore}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg disabled:opacity-60 whitespace-nowrap"
+                  >
+                    <Save className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>{savingStore ? 'Salvando...' : 'Salvar Horários'}</span>
+                  </button>
+                </div>
+              </form>
+            </section>
+          )}
+
+          {/* SECTOR 3: TAXAS E ENTREGA */}
+          {activeTab === 'entrega' && (
+            <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+              <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                  Taxas, Prazos e Área de Entrega
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Defina a política de frete (distância, bairro ou taxa fixa), valor de frete grátis e simule entregas pelo endereço.
+                </p>
+              </div>
+
+              <form
+                onSubmit={(e) => handleSaveStore(e, 'Taxas e Entrega')}
+                className="p-6 space-y-6"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label
+                      htmlFor="cfg-store-fee"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      Taxa Padrão / Fallback (R$)
+                    </label>
+                    <input
+                      id="cfg-store-fee"
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      value={deliveryFee}
+                      onChange={(e) => setDeliveryFee(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="cfg-store-free"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      Frete Grátis a partir (R$)
+                    </label>
+                    <input
+                      id="cfg-store-free"
+                      type="number"
+                      step="1"
+                      min="0"
+                      value={freeDeliveryMin}
+                      onChange={(e) => setFreeDeliveryMin(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="cfg-store-eta"
+                      className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
+                      Previsão Média (min)
+                    </label>
+                    <input
+                      id="cfg-store-eta"
+                      type="number"
+                      min="5"
+                      value={estimatedMinutes}
+                      onChange={(e) => setEstimatedMinutes(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-4">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                      Regra de Cobrança da Taxa de Entrega
+                    </p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Escolha como o frete é calculado no cardápio do cliente e nos pedidos do balcão.
+                    </p>
+                    <div className="mt-2.5 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      {(
+                        [
+                          {
+                            id: 'distancia' as const,
+                            label: 'Por Distância (km)',
+                            desc: 'Google Maps calcula a rota',
+                          },
+                          {
+                            id: 'bairro' as const,
+                            label: 'Por Bairro / Região',
+                            desc: 'Tabela por nome do bairro',
+                          },
+                          {
+                            id: 'fixa' as const,
+                            label: 'Taxa Fixa Única',
+                            desc: 'Valor único p/ qualquer local',
+                          },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setDeliveryFeeMode(opt.id)}
+                          className={`p-3 text-left rounded-lg border transition-colors ${
+                            deliveryFeeMode === opt.id
+                              ? 'bg-brand-50 dark:bg-brand-950/50 border-brand-600 text-brand-900 dark:text-brand-200'
+                              : 'bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          <p className="text-xs font-bold">{opt.label}</p>
+                          <p className="text-[11px] opacity-80 mt-0.5">{opt.desc}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {deliveryFeeMode === 'distancia' && (
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-4">
+                      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+                        <div className="w-full sm:w-56">
+                          <label
+                            htmlFor="cfg-max-km"
+                            className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
                           >
-                            <Plus className="w-3.5 h-3.5" aria-hidden="true" />
-                            <span>Adicionar 2º turno (ex.: Jantar)</span>
+                            Raio Máximo de Entrega (km)
+                          </label>
+                          <input
+                            id="cfg-max-km"
+                            type="number"
+                            min="1"
+                            step="0.5"
+                            value={maxDeliveryKm}
+                            onChange={(e) => setMaxDeliveryKm(e.target.value)}
+                            className="w-full px-3 py-2 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleAddDistanceTier}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-slate-900 border border-brand-200 dark:border-brand-800 hover:bg-brand-50 rounded-lg whitespace-nowrap self-start sm:self-auto"
+                        >
+                          <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>Adicionar Faixa de km</span>
+                        </button>
+                      </div>
+
+                      <div className="space-y-2">
+                        {distanceFeeTiers.map((tier, idx) => (
+                          <div
+                            key={tier.id}
+                            className="grid grid-cols-12 gap-2 items-center"
+                          >
+                            <div className="col-span-4">
+                              <label className="block text-[10px] text-slate-500 mb-0.5">
+                                Até (km)
+                              </label>
+                              <input
+                                type="number"
+                                min="0.5"
+                                step="0.5"
+                                value={tier.maxKm}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value) || 0;
+                                  setDistanceFeeTiers((prev) =>
+                                    prev.map((item, i) =>
+                                      i === idx ? { ...item, maxKm: val } : item,
+                                    ),
+                                  );
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                              />
+                            </div>
+                            <div className="col-span-4">
+                              <label className="block text-[10px] text-slate-500 mb-0.5">
+                                Valor (R$)
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.5"
+                                value={tier.fee}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value) || 0;
+                                  setDistanceFeeTiers((prev) =>
+                                    prev.map((item, i) =>
+                                      i === idx ? { ...item, fee: val } : item,
+                                    ),
+                                  );
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                              />
+                            </div>
+                            <div className="col-span-3">
+                              <label className="block text-[10px] text-slate-500 mb-0.5">
+                                Prazo (min)
+                              </label>
+                              <input
+                                type="number"
+                                min="5"
+                                step="5"
+                                value={tier.estimatedMinutes ?? 35}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value) || 35;
+                                  setDistanceFeeTiers((prev) =>
+                                    prev.map((item, i) =>
+                                      i === idx
+                                        ? { ...item, estimatedMinutes: val }
+                                        : item,
+                                    ),
+                                  );
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                              />
+                            </div>
+                            <div className="col-span-1 pt-4 flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDistanceFeeTiers((prev) =>
+                                    prev.filter((_, i) => i !== idx),
+                                  )
+                                }
+                                aria-label="Remover faixa de distância"
+                                className="p-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Live Google Maps Distance Simulator */}
+                      <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                        <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                          <Navigation className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                          <span>Simulador de Frete por Endereço (Google Maps)</span>
+                        </p>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <input
+                            type="text"
+                            value={simAddress}
+                            onChange={(e) => setSimAddress(e.target.value)}
+                            placeholder="Digite um endereço de cliente para simular..."
+                            className="flex-1 px-3 py-2 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                          />
+                          <button
+                            type="button"
+                            disabled={simBusy}
+                            onClick={handleSimulateDistanceFee}
+                            className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 rounded-lg whitespace-nowrap disabled:opacity-60"
+                          >
+                            {simBusy ? 'Calculando...' : 'Simular Frete'}
                           </button>
                         </div>
-                      )}
-                    </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                      <div>
-                        <label
-                          htmlFor="cfg-store-hours"
-                          className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-                        >
-                          Texto Exibido no Cardápio
-                        </label>
-                        <input
-                          id="cfg-store-hours"
-                          value={openingHours}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setOpeningHours(val);
-                            const parsed = parseOpeningHoursString(val);
-                            if (parsed) {
-                              setScheduleDays(parsed.days);
-                              setShift1Open(parsed.shifts[0]?.open ?? shift1Open);
-                              setShift1Close(parsed.shifts[0]?.close ?? shift1Close);
-                              if (parsed.shifts.length > 1) {
-                                setShift2Enabled(true);
-                                setShift2Open(parsed.shifts[1].open);
-                                setShift2Close(parsed.shifts[1].close);
-                              } else {
-                                setShift2Enabled(false);
-                              }
-                            }
-                          }}
-                          className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
-                        />
-                      </div>
-                      <div>
-                        <label
-                          htmlFor="cfg-store-phone"
-                          className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-                        >
-                          WhatsApp de Contato
-                        </label>
-                        <input
-                          id="cfg-store-phone"
-                          value={phone}
-                          onChange={(e) => setPhone(e.target.value)}
-                          className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label
-                        htmlFor="cfg-store-address"
-                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-                      >
-                        Endereço da Cozinha (Retirada)
-                      </label>
-                      <input
-                        id="cfg-store-address"
-                        value={address}
-                        onChange={(e) => setAddress(e.target.value)}
-                        className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-                      />
-                    </div>
-                    <div>
-                      <label
-                        htmlFor="cfg-store-neighborhood"
-                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-                      >
-                        Bairro / Cidade
-                      </label>
-                      <input
-                        id="cfg-store-neighborhood"
-                        value={neighborhood}
-                        onChange={(e) => setNeighborhood(e.target.value)}
-                        className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
-                    <div>
-                      <label
-                        htmlFor="cfg-store-fee"
-                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-                      >
-                        Taxa Padrão / Fallback (R$)
-                      </label>
-                      <input
-                        id="cfg-store-fee"
-                        type="number"
-                        step="0.5"
-                        min="0"
-                        value={deliveryFee}
-                        onChange={(e) => setDeliveryFee(e.target.value)}
-                        className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-                      />
-                    </div>
-                    <div>
-                      <label
-                        htmlFor="cfg-store-free"
-                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-                      >
-                        Frete Grátis a partir (R$)
-                      </label>
-                      <input
-                        id="cfg-store-free"
-                        type="number"
-                        step="1"
-                        min="0"
-                        value={freeDeliveryMin}
-                        onChange={(e) => setFreeDeliveryMin(e.target.value)}
-                        className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-                      />
-                    </div>
-                    <div>
-                      <label
-                        htmlFor="cfg-store-eta"
-                        className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-                      >
-                        Previsão Média (min)
-                      </label>
-                      <input
-                        id="cfg-store-eta"
-                        type="number"
-                        min="5"
-                        value={estimatedMinutes}
-                        onChange={(e) => setEstimatedMinutes(e.target.value)}
-                        className="w-full px-3 py-2 text-sm font-mono-tabular bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Delivery Fee Mode & Dynamic Tiers */}
-                  <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-4">
-                    <div>
-                      <p className="text-xs font-semibold text-slate-900 dark:text-white">
-                        Regra de Cobrança da Taxa de Entrega
-                      </p>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Escolha como o frete é calculado no cardápio do cliente e nos pedidos do balcão.
-                      </p>
-                      <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        {(
-                          [
-                            {
-                              id: 'distancia' as const,
-                              label: 'Por Distância (km)',
-                              desc: 'Google Maps calcula a rota',
-                            },
-                            {
-                              id: 'bairro' as const,
-                              label: 'Por Bairro / Região',
-                              desc: 'Tabela por nome do bairro',
-                            },
-                            {
-                              id: 'fixa' as const,
-                              label: 'Taxa Fixa Única',
-                              desc: 'Valor único p/ qualquer local',
-                            },
-                          ] as const
-                        ).map((opt) => (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            onClick={() => setDeliveryFeeMode(opt.id)}
-                            className={`p-3 text-left rounded-lg border transition-colors ${
-                              deliveryFeeMode === opt.id
-                                ? 'bg-brand-50 dark:bg-brand-950/50 border-brand-600 text-brand-900 dark:text-brand-200'
-                                : 'bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+                        {simResult && (
+                          <div
+                            className={`p-3 rounded-lg border text-xs ${
+                              simResult.outOfRange || simResult.quotaExceeded
+                                ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-300'
+                                : 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
                             }`}
                           >
-                            <p className="text-xs font-bold">{opt.label}</p>
-                            <p className="text-[11px] opacity-80 mt-0.5">{opt.desc}</p>
-                          </button>
+                            {simResult.distanceKm !== null ? (
+                              <p className="font-mono-tabular">
+                                Distância: <strong>{simResult.distanceKm.toFixed(1)} km</strong> ·{' '}
+                                ~{simResult.estimatedMinutes} min ·{' '}
+                                {simResult.matchedRuleLabel} · Taxa:{' '}
+                                <strong>{formatCurrencyBRL(simResult.deliveryFee)}</strong>
+                              </p>
+                            ) : (
+                              <p>
+                                {simResult.apiError ||
+                                  'Não foi possível medir a rota exata. Aplicada taxa padrão:'}{' '}
+                                <strong className="font-mono-tabular">
+                                  {formatCurrencyBRL(simResult.deliveryFee)}
+                                </strong>
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {deliveryFeeMode === 'bairro' && (
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                          <MapPin className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                          <span>Tabela de Taxas por Bairro</span>
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleAddNeighborhoodRule}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-slate-900 border border-brand-200 dark:border-brand-800 hover:bg-brand-50 rounded-lg whitespace-nowrap"
+                        >
+                          <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                          <span>Adicionar Bairro</span>
+                        </button>
+                      </div>
+
+                      <div className="space-y-2">
+                        {neighborhoodFees.map((rule, idx) => (
+                          <div
+                            key={rule.id}
+                            className="grid grid-cols-12 gap-2 items-center"
+                          >
+                            <div className="col-span-5">
+                              <input
+                                type="text"
+                                value={rule.neighborhood}
+                                placeholder="Nome do bairro"
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setNeighborhoodFees((prev) =>
+                                    prev.map((item, i) =>
+                                      i === idx ? { ...item, neighborhood: val } : item,
+                                    ),
+                                  );
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                              />
+                            </div>
+                            <div className="col-span-3">
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.5"
+                                value={rule.fee}
+                                aria-label="Taxa do bairro"
+                                onChange={(e) => {
+                                  const val = Number(e.target.value) || 0;
+                                  setNeighborhoodFees((prev) =>
+                                    prev.map((item, i) =>
+                                      i === idx ? { ...item, fee: val } : item,
+                                    ),
+                                  );
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                              />
+                            </div>
+                            <div className="col-span-3">
+                              <input
+                                type="number"
+                                min="5"
+                                step="5"
+                                value={rule.estimatedMinutes ?? 35}
+                                aria-label="Prazo em minutos"
+                                onChange={(e) => {
+                                  const val = Number(e.target.value) || 35;
+                                  setNeighborhoodFees((prev) =>
+                                    prev.map((item, i) =>
+                                      i === idx
+                                        ? { ...item, estimatedMinutes: val }
+                                        : item,
+                                    ),
+                                  );
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+                              />
+                            </div>
+                            <div className="col-span-1 flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setNeighborhoodFees((prev) =>
+                                    prev.filter((_, i) => i !== idx),
+                                  )
+                                }
+                                aria-label="Remover bairro"
+                                className="p-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                              </button>
+                            </div>
+                          </div>
                         ))}
                       </div>
                     </div>
+                  )}
 
-                    {deliveryFeeMode === 'distancia' && (
-                      <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-4">
-                        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-                          <div className="w-full sm:w-52">
-                            <label
-                              htmlFor="cfg-max-km"
-                              className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
-                            >
-                              Raio Máximo de Entrega (km)
-                            </label>
-                            <input
-                              id="cfg-max-km"
-                              type="number"
-                              min="1"
-                              step="0.5"
-                              value={maxDeliveryKm}
-                              onChange={(e) => setMaxDeliveryKm(e.target.value)}
-                              className="w-full px-3 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
-                            />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={handleAddDistanceTier}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-slate-900 border border-brand-200 dark:border-brand-800 hover:bg-brand-50 rounded-lg whitespace-nowrap self-start sm:self-auto"
-                          >
-                            <Plus className="w-3.5 h-3.5" aria-hidden="true" />
-                            <span>Adicionar Faixa de km</span>
-                          </button>
-                        </div>
+                  {deliveryFeeMode === 'fixa' && (
+                    <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
+                      Todas as entregas utilizarão a taxa única de{' '}
+                      <strong className="font-mono-tabular text-slate-900 dark:text-white">
+                        {formatCurrencyBRL(Number(deliveryFee) || 0)}
+                      </strong>{' '}
+                      com previsão média de{' '}
+                      <strong className="font-mono-tabular text-slate-900 dark:text-white">
+                        {estimatedMinutes || '30'} min
+                      </strong>
+                      {Number(freeDeliveryMin) > 0
+                        ? ` (isenção automática em pedidos a partir de ${formatCurrencyBRL(Number(freeDeliveryMin))}).`
+                        : '.'}
+                    </div>
+                  )}
+                </div>
 
-                        <div className="space-y-2">
-                          {distanceFeeTiers.map((tier, idx) => (
-                            <div
-                              key={tier.id}
-                              className="grid grid-cols-12 gap-2 items-center"
-                            >
-                              <div className="col-span-4">
-                                <label className="block text-[10px] text-slate-500 mb-0.5">
-                                  Até (km)
-                                </label>
-                                <input
-                                  type="number"
-                                  min="0.5"
-                                  step="0.5"
-                                  value={tier.maxKm}
-                                  onChange={(e) => {
-                                    const val = Number(e.target.value) || 0;
-                                    setDistanceFeeTiers((prev) =>
-                                      prev.map((item, i) =>
-                                        i === idx ? { ...item, maxKm: val } : item,
-                                      ),
-                                    );
-                                  }}
-                                  className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
-                                />
-                              </div>
-                              <div className="col-span-4">
-                                <label className="block text-[10px] text-slate-500 mb-0.5">
-                                  Valor (R$)
-                                </label>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.5"
-                                  value={tier.fee}
-                                  onChange={(e) => {
-                                    const val = Number(e.target.value) || 0;
-                                    setDistanceFeeTiers((prev) =>
-                                      prev.map((item, i) =>
-                                        i === idx ? { ...item, fee: val } : item,
-                                      ),
-                                    );
-                                  }}
-                                  className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
-                                />
-                              </div>
-                              <div className="col-span-3">
-                                <label className="block text-[10px] text-slate-500 mb-0.5">
-                                  Prazo (min)
-                                </label>
-                                <input
-                                  type="number"
-                                  min="5"
-                                  step="5"
-                                  value={tier.estimatedMinutes ?? 35}
-                                  onChange={(e) => {
-                                    const val = Number(e.target.value) || 35;
-                                    setDistanceFeeTiers((prev) =>
-                                      prev.map((item, i) =>
-                                        i === idx
-                                          ? { ...item, estimatedMinutes: val }
-                                          : item,
-                                      ),
-                                    );
-                                  }}
-                                  className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
-                                />
-                              </div>
-                              <div className="col-span-1 pt-4 flex justify-end">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setDistanceFeeTiers((prev) =>
-                                      prev.filter((_, i) => i !== idx),
-                                    )
-                                  }
-                                  aria-label="Remover faixa de distância"
-                                  className="p-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={savingStore}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg disabled:opacity-60 whitespace-nowrap"
+                  >
+                    <Save className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>{savingStore ? 'Salvando...' : 'Salvar Taxas e Entrega'}</span>
+                  </button>
+                </div>
+              </form>
+            </section>
+          )}
 
-                        {/* Live Google Maps Distance Simulator */}
-                        <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
-                          <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                            <Navigation className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" aria-hidden="true" />
-                            <span>Simulador de Frete por Endereço (Google Maps)</span>
-                          </p>
-                          <div className="flex flex-col sm:flex-row gap-2">
-                            <input
-                              type="text"
-                              value={simAddress}
-                              onChange={(e) => setSimAddress(e.target.value)}
-                              placeholder="Digite um endereço de cliente para simular..."
-                              className="flex-1 px-3 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
-                            />
-                            <button
-                              type="button"
-                              disabled={simBusy}
-                              onClick={handleSimulateDistanceFee}
-                              className="px-3.5 py-1.5 text-xs font-semibold text-white bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 rounded-lg whitespace-nowrap disabled:opacity-60"
-                            >
-                              {simBusy ? 'Calculando...' : 'Simular Frete'}
-                            </button>
-                          </div>
+          {/* SECTOR 4: VISUAL E MARCA */}
+          {activeTab === 'visual' && (
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+              <section className="xl:col-span-7 bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                    Identidade Visual e Imagens
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Gerencie o logo exibido nos painéis e a capa do Cardápio Online do cliente.
+                  </p>
+                </div>
 
-                          {simResult && (
-                            <div
-                              className={`p-2.5 rounded-lg border text-xs ${
-                                simResult.outOfRange || simResult.quotaExceeded
-                                  ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-300'
-                                  : 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
-                              }`}
-                            >
-                              {simResult.distanceKm !== null ? (
-                                <p className="font-mono-tabular">
-                                  Distância: <strong>{simResult.distanceKm.toFixed(1)} km</strong> ·{' '}
-                                  ~{simResult.estimatedMinutes} min ·{' '}
-                                  {simResult.matchedRuleLabel} · Taxa:{' '}
-                                  <strong>{formatCurrencyBRL(simResult.deliveryFee)}</strong>
-                                </p>
-                              ) : (
-                                <p>
-                                  {simResult.apiError ||
-                                    'Não foi possível medir a rota exata. Aplicada taxa padrão:'}{' '}
-                                  <strong className="font-mono-tabular">
-                                    {formatCurrencyBRL(simResult.deliveryFee)}
-                                  </strong>
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {deliveryFeeMode === 'bairro' && (
-                      <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                            <MapPin className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" aria-hidden="true" />
-                            <span>Tabela de Taxas por Bairro</span>
-                          </p>
-                          <button
-                            type="button"
-                            onClick={handleAddNeighborhoodRule}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-white dark:bg-slate-900 border border-brand-200 dark:border-brand-800 hover:bg-brand-50 rounded-lg whitespace-nowrap"
-                          >
-                            <Plus className="w-3.5 h-3.5" aria-hidden="true" />
-                            <span>Adicionar Bairro</span>
-                          </button>
-                        </div>
-
-                        <div className="space-y-2">
-                          {neighborhoodFees.map((rule, idx) => (
-                            <div
-                              key={rule.id}
-                              className="grid grid-cols-12 gap-2 items-center"
-                            >
-                              <div className="col-span-5">
-                                <input
-                                  type="text"
-                                  value={rule.neighborhood}
-                                  placeholder="Nome do bairro"
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setNeighborhoodFees((prev) =>
-                                      prev.map((item, i) =>
-                                        i === idx ? { ...item, neighborhood: val } : item,
-                                      ),
-                                    );
-                                  }}
-                                  className="w-full px-2.5 py-1.5 text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
-                                />
-                              </div>
-                              <div className="col-span-3">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.5"
-                                  value={rule.fee}
-                                  aria-label="Taxa do bairro"
-                                  onChange={(e) => {
-                                    const val = Number(e.target.value) || 0;
-                                    setNeighborhoodFees((prev) =>
-                                      prev.map((item, i) =>
-                                        i === idx ? { ...item, fee: val } : item,
-                                      ),
-                                    );
-                                  }}
-                                  className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
-                                />
-                              </div>
-                              <div className="col-span-3">
-                                <input
-                                  type="number"
-                                  min="5"
-                                  step="5"
-                                  value={rule.estimatedMinutes ?? 35}
-                                  aria-label="Prazo em minutos"
-                                  onChange={(e) => {
-                                    const val = Number(e.target.value) || 35;
-                                    setNeighborhoodFees((prev) =>
-                                      prev.map((item, i) =>
-                                        i === idx
-                                          ? { ...item, estimatedMinutes: val }
-                                          : item,
-                                      ),
-                                    );
-                                  }}
-                                  className="w-full px-2.5 py-1.5 text-xs font-mono-tabular bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
-                                />
-                              </div>
-                              <div className="col-span-1 flex justify-end">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setNeighborhoodFees((prev) =>
-                                      prev.filter((_, i) => i !== idx),
-                                    )
-                                  }
-                                  aria-label="Remover bairro"
-                                  className="p-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
-                                </button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
+                <form
+                  onSubmit={(e) => handleSaveStore(e, 'Visual e Marca')}
+                  className="p-6 space-y-6"
+                >
                   {/* Company Logo Configuration */}
-                  <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <p className="text-xs font-semibold text-slate-900 dark:text-white">
                           Logo da Empresa
                         </p>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                          Exibido no painel administrativo, no cardápio digital do cliente e no portal do motoboy.
+                          Exibido no painel administrativo, no cardápio digital e nos portais da equipe.
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
@@ -1747,7 +1912,8 @@ export function SettingsSection({
                     </div>
                   </div>
 
-                  <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                  {/* Cover Image */}
+                  <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <p className="text-xs font-semibold text-slate-900 dark:text-white">
@@ -1824,190 +1990,200 @@ export function SettingsSection({
                     <button
                       type="submit"
                       disabled={savingStore}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg disabled:opacity-60"
+                      className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg disabled:opacity-60 whitespace-nowrap"
                     >
                       <Save className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>{savingStore ? 'Salvando...' : 'Salvar Dados da Loja'}</span>
+                      <span>{savingStore ? 'Salvando...' : 'Salvar Visual e Marca'}</span>
                     </button>
                   </div>
                 </form>
               </section>
 
-              <div className="xl:col-span-4 space-y-6">
-                <aside className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
-                  <div className="aspect-video w-full bg-slate-100 dark:bg-slate-800 relative overflow-hidden">
-                    {heroImgFailed || !heroImage.trim() ? (
-                      <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 p-4 text-center">
-                        <Store className="w-8 h-8 mb-2" aria-hidden="true" />
-                        <span className="text-sm font-medium">{store.name}</span>
-                      </div>
-                    ) : (
-                      <img
-                        src={heroImage}
-                        alt={store.name}
-                        referrerPolicy="no-referrer"
-                        onError={() => setHeroImgFailed(true)}
-                        className="w-full h-full object-cover"
-                      />
-                    )}
-                  </div>
-                  <div className="p-5 space-y-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg overflow-hidden bg-brand-600 text-white flex items-center justify-center shrink-0">
-                        {logoImage.trim() && !logoImgFailed ? (
-                          <img
-                            src={logoImage}
-                            alt={store.name}
-                            referrerPolicy="no-referrer"
-                            onError={() => setLogoImgFailed(true)}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <span className="text-sm font-extrabold">
-                            {(name || 'P').trim().charAt(0).toUpperCase()}
-                          </span>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
-                          {store.segment} · {store.neighborhood}
-                        </p>
-                        <h3 className="mt-0.5 text-base font-bold text-slate-900 dark:text-white truncate">
-                          {store.name}
-                        </h3>
-                      </div>
+              <aside className="xl:col-span-5 bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800">
+                  <p className="text-xs font-semibold text-slate-900 dark:text-white">
+                    Prévia da Vitrine do Cliente
+                  </p>
+                </div>
+                <div className="aspect-video w-full bg-slate-100 dark:bg-slate-800 relative overflow-hidden">
+                  {heroImgFailed || !heroImage.trim() ? (
+                    <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 p-4 text-center">
+                      <Store className="w-8 h-8 mb-2" aria-hidden="true" />
+                      <span className="text-sm font-medium">{name || store.name}</span>
                     </div>
-                    <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-1.5 text-xs">
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">Cobrança de frete</span>
-                        <span className="font-semibold text-slate-900 dark:text-white">
-                          {deliveryFeeMode === 'distancia'
-                            ? `Por distância (até ${maxDeliveryKm} km)`
-                            : deliveryFeeMode === 'bairro'
-                              ? `Por bairro (${neighborhoodFees.length})`
-                              : `Fixa (${formatCurrencyBRL(store.deliveryFee)})`}
+                  ) : (
+                    <img
+                      src={heroImage}
+                      alt={name || store.name}
+                      referrerPolicy="no-referrer"
+                      onError={() => setHeroImgFailed(true)}
+                      className="w-full h-full object-cover"
+                    />
+                  )}
+                </div>
+                <div className="p-5 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg overflow-hidden bg-brand-600 text-white flex items-center justify-center shrink-0">
+                      {logoImage.trim() && !logoImgFailed ? (
+                        <img
+                          src={logoImage}
+                          alt={name || store.name}
+                          referrerPolicy="no-referrer"
+                          onError={() => setLogoImgFailed(true)}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-sm font-extrabold">
+                          {(name || 'P').trim().charAt(0).toUpperCase()}
                         </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">Frete grátis acima de</span>
-                        <span className="font-mono-tabular font-semibold text-emerald-700 dark:text-emerald-400">
-                          {formatCurrencyBRL(store.freeDeliveryMin)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">Tempo médio</span>
-                        <span className="font-mono-tabular font-semibold text-slate-900 dark:text-white">
-                          {store.estimatedMinutes} min
-                        </span>
-                      </div>
+                      )}
                     </div>
-                  </div>
-                </aside>
-
-                <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3.5">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                        <Link2 className="w-4 h-4 text-brand-600 dark:text-brand-400" aria-hidden="true" />
-                        <span>Link de Acesso do Cliente</span>
-                      </h3>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                        Envie este endereço no WhatsApp, Instagram ou QR Code das mesas para o cliente pedir direto sem acessar o painel.
+                    <div className="min-w-0">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                        {segment || store.segment} · {neighborhood || store.neighborhood}
                       </p>
+                      <h3 className="mt-0.5 text-base font-bold text-slate-900 dark:text-white truncate">
+                        {name || store.name}
+                      </h3>
                     </div>
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={customerMenuUrl}
-                      onFocus={(e) => e.currentTarget.select()}
-                      aria-label="Link público do cardápio para clientes"
-                      className="flex-1 min-w-0 px-3 py-2 text-xs font-mono-tabular bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-800 dark:text-slate-200"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleCopyCustomerLink}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg whitespace-nowrap shrink-0"
-                    >
-                      {copiedCustomerLink ? (
-                        <>
-                          <Check className="w-3.5 h-3.5" aria-hidden="true" />
-                          <span>Copiado</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" aria-hidden="true" />
-                          <span>Copiar</span>
-                        </>
-                      )}
-                    </button>
+                  <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-1.5 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Cobrança de frete</span>
+                      <span className="font-semibold text-slate-900 dark:text-white">
+                        {deliveryFeeMode === 'distancia'
+                          ? `Por distância (até ${maxDeliveryKm} km)`
+                          : deliveryFeeMode === 'bairro'
+                            ? `Por bairro (${neighborhoodFees.length})`
+                            : `Fixa (${formatCurrencyBRL(Number(deliveryFee) || 0)})`}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Frete grátis acima de</span>
+                      <span className="font-mono-tabular font-semibold text-emerald-700 dark:text-emerald-400">
+                        {formatCurrencyBRL(Number(freeDeliveryMin) || 0)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Tempo médio</span>
+                      <span className="font-mono-tabular font-semibold text-slate-900 dark:text-white">
+                        {estimatedMinutes || store.estimatedMinutes} min
+                      </span>
+                    </div>
                   </div>
+                </div>
+              </aside>
+            </div>
+          )}
 
-                  <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <a
-                      href="/cardapio"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg whitespace-nowrap"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>Abrir Cardápio do Cliente</span>
-                    </a>
-                    <a
-                      href={`https://wa.me/?text=${encodeURIComponent(
-                        `Peça pelo nosso cardápio digital (${store.name}): ${customerMenuUrl}`,
-                      )}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-lg whitespace-nowrap"
-                    >
-                      <Share2 className="w-3.5 h-3.5" aria-hidden="true" />
-                      <span>Compartilhar WhatsApp</span>
-                    </a>
-                  </div>
-                </section>
+          {/* SECTOR 5: LINKS E PORTAIS */}
+          {activeTab === 'links' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Customer Menu Portal */}
+              <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3.5">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Link2 className="w-4 h-4 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                    <span>Cardápio Online do Cliente</span>
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Envie este link no WhatsApp, Instagram ou QR Code para o cliente montar e acompanhar pedidos direto.
+                  </p>
+                </div>
 
-                <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3.5">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                      <Bike className="w-4 h-4 text-brand-600 dark:text-brand-400" aria-hidden="true" />
-                      <span>Portal Exclusivo do Motoboy (GPS)</span>
-                    </h3>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                      Link exclusivo para os entregadores verem os pedidos da rota, traçar trajeto GPS e marcar entrega concluída no celular.
-                    </p>
-                  </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={customerMenuUrl}
+                    onFocus={(e) => e.currentTarget.select()}
+                    aria-label="Link público do cardápio para clientes"
+                    className="flex-1 min-w-0 px-3 py-2 text-xs font-mono-tabular bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-800 dark:text-slate-200"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCopyPortalLink('cliente', customerMenuUrl)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg whitespace-nowrap shrink-0"
+                  >
+                    {copiedLinkKey === 'cliente' ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Copiado</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Copiar</span>
+                      </>
+                    )}
+                  </button>
+                </div>
 
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={courierPortalUrl}
-                      onFocus={(e) => e.currentTarget.select()}
-                      aria-label="Link exclusivo do portal do motoboy"
-                      className="flex-1 min-w-0 px-3 py-2 text-xs font-mono-tabular bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-800 dark:text-slate-200"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleCopyCourierLink}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 rounded-lg whitespace-nowrap shrink-0"
-                    >
-                      {copiedCourierLink ? (
-                        <>
-                          <Check className="w-3.5 h-3.5" aria-hidden="true" />
-                          <span>Copiado</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" aria-hidden="true" />
-                          <span>Copiar</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <a
+                    href="/cardapio"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg whitespace-nowrap"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Abrir Cardápio</span>
+                  </a>
+                  <a
+                    href={`https://wa.me/?text=${encodeURIComponent(
+                      `Peça pelo nosso cardápio digital (${store.name}): ${customerMenuUrl}`,
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 rounded-lg whitespace-nowrap"
+                  >
+                    <Share2 className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Compartilhar WhatsApp</span>
+                  </a>
+                </div>
+              </section>
 
+              {/* Courier Portal */}
+              <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3.5">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Bike className="w-4 h-4 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                    <span>Portal do Motoboy (GPS)</span>
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Link exclusivo para entregadores visualizarem rotas GPS, concluírem entregas e consultarem repasses.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={courierPortalUrl}
+                    onFocus={(e) => e.currentTarget.select()}
+                    aria-label="Link exclusivo do portal do motoboy"
+                    className="flex-1 min-w-0 px-3 py-2 text-xs font-mono-tabular bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-800 dark:text-slate-200"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCopyPortalLink('motoboy', courierPortalUrl)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 rounded-lg whitespace-nowrap shrink-0"
+                  >
+                    {copiedLinkKey === 'motoboy' ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Copiado</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Copiar</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="pt-1">
                   <a
                     href="/motoboy"
                     target="_blank"
@@ -2017,8 +2193,114 @@ export function SettingsSection({
                     <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
                     <span>Abrir Portal do Motoboy</span>
                   </a>
-                </section>
-              </div>
+                </div>
+              </section>
+
+              {/* Kitchen Portal */}
+              <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3.5">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <ChefHat className="w-4 h-4 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                    <span>Portal da Cozinha &amp; Desperdícios</span>
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Tela do tablet da cozinha com alertas de pedidos prioritários em tempo real, checklists, baixa de desperdício e gráficos.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={kitchenPortalUrl}
+                    onFocus={(e) => e.currentTarget.select()}
+                    aria-label="Link exclusivo do portal da cozinha"
+                    className="flex-1 min-w-0 px-3 py-2 text-xs font-mono-tabular bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-800 dark:text-slate-200"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCopyPortalLink('cozinha', kitchenPortalUrl)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 rounded-lg whitespace-nowrap shrink-0"
+                  >
+                    {copiedLinkKey === 'cozinha' ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Copiado</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Copiar</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="pt-1">
+                  <a
+                    href="/cozinha"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg whitespace-nowrap"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Abrir Portal da Cozinha</span>
+                  </a>
+                </div>
+              </section>
+
+              {/* Staff Portal */}
+              <section className="bg-white dark:bg-[#13151c] border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3.5">
+                <div>
+                  <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Users className="w-4 h-4 text-brand-600 dark:text-brand-400" aria-hidden="true" />
+                    <span>Portal do Funcionário</span>
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Acesso pelo celular para colaboradores acompanharem tarefas, checklists, descartes e extrato de vales e pagamentos.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={staffPortalUrl}
+                    onFocus={(e) => e.currentTarget.select()}
+                    aria-label="Link exclusivo do portal do funcionário"
+                    className="flex-1 min-w-0 px-3 py-2 text-xs font-mono-tabular bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-800 dark:text-slate-200"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCopyPortalLink('equipe', staffPortalUrl)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 rounded-lg whitespace-nowrap shrink-0"
+                  >
+                    {copiedLinkKey === 'equipe' ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Copiado</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+                        <span>Copiar</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="pt-1">
+                  <a
+                    href="/equipe"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg whitespace-nowrap"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+                    <span>Abrir Portal do Funcionário</span>
+                  </a>
+                </div>
+              </section>
             </div>
           )}
 
