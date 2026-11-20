@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDeliveryStore } from '@/lib/server-store';
+import { normalizeMenuItemDays } from '@/lib/store-hours';
 import type { Coupon, MenuCategory, MenuItem } from '@/types/delivery';
 
 export async function GET() {
@@ -35,6 +36,7 @@ export async function POST(request: NextRequest) {
           body.data.image?.trim() ||
           '/images/dish_frango_grelhado_1794779703159.jpg',
         available: body.data.available ?? true,
+        availableDays: normalizeMenuItemDays(body.data.availableDays),
         prepMinutes: Math.max(1, Number(body.data.prepMinutes) || 20),
         serves: (body.data.serves || 'Serve 1 pessoa').trim(),
         addonGroups: Array.isArray(body.data.addonGroups)
@@ -107,8 +109,14 @@ export async function PATCH(request: NextRequest) {
     const db = getDeliveryStore();
 
     if (body.entity === 'menu_item') {
+      const sanitizedUpdates = { ...body.updates };
+      if ('availableDays' in sanitizedUpdates) {
+        sanitizedUpdates.availableDays = normalizeMenuItemDays(
+          sanitizedUpdates.availableDays,
+        );
+      }
       db.menuItems = db.menuItems.map((item) =>
-        item.id === body.id ? { ...item, ...body.updates } : item,
+        item.id === body.id ? { ...item, ...sanitizedUpdates } : item,
       );
       return NextResponse.json({ ok: true, menuItems: db.menuItems });
     }

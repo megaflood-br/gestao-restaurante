@@ -8,7 +8,12 @@ import {
 } from '@/lib/crm-engine';
 import { getRuntimeApiCredentials } from '@/lib/server-store';
 import { applyOrderStockDeduction } from '@/lib/stock-engine';
-import { getStoreAvailability } from '@/lib/store-hours';
+import {
+  formatMenuItemDaysLabel,
+  getStoreAvailability,
+  getWeekdayLabel,
+  isMenuItemAvailableOnDay,
+} from '@/lib/store-hours';
 import type {
   DeliveryMode,
   DeliveryStoreState,
@@ -114,6 +119,7 @@ function createOrderFromBot(params: {
   const resolvedName = crmCustomer?.name || customerName.trim() || 'Cliente WhatsApp';
 
   const orderItems: OrderItem[] = [];
+  const offDayRejectedNames: string[] = [];
   for (const reqItem of args.items) {
     const found = state.menuItems.find(
       (m) =>
@@ -121,6 +127,12 @@ function createOrderFromBot(params: {
         m.name.toLowerCase().includes(reqItem.menuItemId.toLowerCase()),
     );
     if (!found || !found.available) continue;
+    if (!isMenuItemAvailableOnDay(found, availability.currentDayIndex)) {
+      offDayRejectedNames.push(
+        `${found.name} (disponível apenas: ${formatMenuItemDaysLabel(found.availableDays)})`,
+      );
+      continue;
+    }
     const qty = Math.max(1, Math.round(reqItem.quantity || 1));
     const unitPrice = found.promoPrice ?? found.price;
     orderItems.push({
@@ -139,7 +151,10 @@ function createOrderFromBot(params: {
     return {
       ok: false,
       stockMovements: [],
-      error: 'Nenhum prato disponível foi identificado no pedido.',
+      error:
+        offDayRejectedNames.length > 0
+          ? `Os itens solicitados não estão no cardápio de hoje: ${offDayRejectedNames.join('; ')}.`
+          : 'Nenhum prato disponível foi identificado no pedido.',
     };
   }
 
@@ -324,10 +339,21 @@ function buildStoreContextPrompt(
     customerPhone,
   ).slice(0, 5);
 
+  const storeAvailability = getStoreAvailability(state.store);
+  const todayLabel = getWeekdayLabel(storeAvailability.currentDayIndex);
+
   const menuSummary = state.menuItems
     .map((item) => {
       const price = item.promoPrice ?? item.price;
-      const status = item.available ? 'Disponível' : 'Esgotado';
+      const availableToday = isMenuItemAvailableOnDay(
+        item,
+        storeAvailability.currentDayIndex,
+      );
+      const status = !item.available
+        ? 'Esgotado'
+        : availableToday
+          ? 'Disponível hoje'
+          : `Indisponível hoje — servido somente: ${formatMenuItemDaysLabel(item.availableDays)}`;
       const addons = item.addonGroups
         .map(
           (g) =>
@@ -441,16 +467,16 @@ function buildStoreContextPrompt(
       ? `11. Instruções específicas da loja: ${evo.customInstructions}`
       : ``,
     ``,
-    `Dados atuais da loja:`,
+    `Dados atuais da loja (hoje é ${todayLabel}):`,
     `- Nome: ${state.store.name}`,
-    `- Status agora: ${getStoreAvailability(state.store).isOpen ? 'ABERTA recebendo pedidos' : `FECHADA no momento (${getStoreAvailability(state.store).closedReason})`}`,
+    `- Status agora: ${storeAvailability.isOpen ? 'ABERTA recebendo pedidos' : `FECHADA no momento (${storeAvailability.closedReason})`}`,
     `- Horário: ${state.store.openingHours}`,
     `- Endereço para retirada: ${state.store.address}, ${state.store.neighborhood}`,
     `- Taxa de entrega: ${formatCurrencyBRL(state.store.deliveryFee)} (grátis acima de ${formatCurrencyBRL(state.store.freeDeliveryMin)})`,
     `- Previsão média: ${state.store.estimatedMinutes} minutos`,
     `- Pagamentos: Pix, Cartão na entrega, Dinheiro e Pagamento Online.`,
     ``,
-    `Cardápio atual (consulte internamente; só liste ao cliente quando ele pedir):`,
+    `Cardápio atual (consulte internamente; só liste ao cliente pratos marcados como "Disponível hoje" e avise os dias corretos se o cliente pedir algo indisponível hoje):`,
     menuSummary,
     ``,
     `Cupons ativos:`,
@@ -485,6 +511,7 @@ function extractItemsFromMessage(
     { id: 'item-bife-acebolado', keywords: ['bife', 'acebolado', 'contrafil'] },
     { id: 'item-strogonoff', keywords: ['strogonoff', 'estrogonofe'] },
     { id: 'item-tilapia-limao', keywords: ['tilapia', 'tilápia', 'peixe'] },
+    { id: 'item-feijoada', keywords: ['feijoada'] },
     { id: 'item-tropeiro', keywords: ['tropeiro'] },
     { id: 'item-suco-laranja', keywords: ['suco', 'laranja'] },
   ];
@@ -665,14 +692,20 @@ function generateLocalBrendiFallback(params: {
 
   if (askedForMenu) {
     const availableDishes = state.menuItems
-      .filter((i) => i.available)
+      .filter(
+        (i) =>
+          i.available &&
+          isMenuItemAvailableOnDay(i, availability.currentDayIndex),
+      )
       .map(
         (i) => `• *${i.name}* — ${formatCurrencyBRL(i.promoPrice ?? i.price)}`,
       )
       .join('\n');
 
     return {
-      reply: `Claro, ${firstName}! Aqui estão as opções disponíveis hoje:\n\n${availableDishes}\n\nSe preferir ver fotos e montar adicionais, acesse: ${appUrl}\nOu me diga aqui o que vai querer que eu já anoto pra você!`,
+      reply: availableDishes
+        ? `Claro, ${firstName}! Aqui estão as opções disponíveis hoje (${getWeekdayLabel(availability.currentDayIndex)}):\n\n${availableDishes}\n\nSe preferir ver fotos e montar adicionais, acesse: ${appUrl}\nOu me diga aqui o que vai querer que eu já anoto pra você!`
+        : `Oi, ${firstName}! No momento não há pratos ativos no cardápio de hoje. Confira mais detalhes em: ${appUrl}`,
     };
   }
 
@@ -802,9 +835,26 @@ function generateLocalBrendiFallback(params: {
     mentionedItems = customerOrders[0].items
       .filter((i) => {
         const menu = state.menuItems.find((m) => m.id === i.menuItemId);
-        return menu && menu.available;
+        return (
+          menu &&
+          menu.available &&
+          isMenuItemAvailableOnDay(menu, availability.currentDayIndex)
+        );
       })
       .map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity }));
+  }
+
+  const offDayMentioned = mentionedItems.find((mi) => {
+    const dish = state.menuItems.find((m) => m.id === mi.menuItemId);
+    return dish && !isMenuItemAvailableOnDay(dish, availability.currentDayIndex);
+  });
+  if (offDayMentioned) {
+    const dish = state.menuItems.find((m) => m.id === offDayMentioned.menuItemId);
+    if (dish) {
+      return {
+        reply: `Poxa, ${firstName}, o *${dish.name}* não entra no cardápio de hoje (${getWeekdayLabel(availability.currentDayIndex)}). Ele é servido apenas: *${formatMenuItemDaysLabel(dish.availableDays)}*! Quer que eu te passe as opções de hoje?`,
+      };
+    }
   }
 
   const details = extractDeliveryAndPayment(state, userMessage);

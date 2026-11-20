@@ -200,6 +200,8 @@ export interface MenuItem {
   promoPrice?: number;
   image: string;
   available: boolean;
+  /** Dias da semana (0=Dom..6=Sáb) em que o prato aparece no cardápio. Vazio/undefined = todos os dias. */
+  availableDays?: number[];
   prepMinutes: number;
   serves: string;
   addonGroups: AddonGroup[];

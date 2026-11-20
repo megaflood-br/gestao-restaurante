@@ -15,6 +15,12 @@ import {
 import { formatCurrencyBRL } from '@/lib/formatters';
 import { calculateDeliveryQuote } from '@/lib/delivery-pricing';
 import {
+  formatMenuItemDaysLabel,
+  getStoreAvailability,
+  isMenuItemAvailableOnDay,
+  normalizeMenuItemDays,
+} from '@/lib/store-hours';
+import {
   computeRewardDiscountOnOrder,
   findCustomerByPhone,
   formatPhoneBR,
@@ -112,6 +118,10 @@ export function ManualOrderModal({
   }, [open, preselectedCustomer]);
 
   const customers = state.customers ?? [];
+  const currentDayIndex = useMemo(
+    () => getStoreAvailability(state.store).currentDayIndex,
+    [state.store],
+  );
 
   const filteredCrmCustomers = useMemo(() => {
     const q = normalizeSearchText(crmSearch);
@@ -783,6 +793,11 @@ export function ManualOrderModal({
                 {state.menuItems.map((item) => {
                   const qty = quantities[item.id] ?? 0;
                   const price = item.promoPrice ?? item.price;
+                  const availableToday = isMenuItemAvailableOnDay(
+                    item,
+                    currentDayIndex,
+                  );
+                  const restrictedDays = normalizeMenuItemDays(item.availableDays);
                   return (
                     <div
                       key={item.id}
@@ -794,6 +809,21 @@ export function ManualOrderModal({
                         </p>
                         <p className="text-xs font-mono-tabular text-slate-500">
                           {formatCurrencyBRL(price)}
+                          {restrictedDays && (
+                            <span
+                              className={
+                                availableToday
+                                  ? ' text-emerald-700 dark:text-emerald-400 font-sans'
+                                  : ' text-amber-700 dark:text-amber-400 font-sans'
+                              }
+                            >
+                              {' '}
+                              ·{' '}
+                              {availableToday
+                                ? `Cardápio de hoje (${formatMenuItemDaysLabel(restrictedDays)})`
+                                : `Fora de hoje (${formatMenuItemDaysLabel(restrictedDays)})`}
+                            </span>
+                          )}
                         </p>
                       </div>
                       <div className="inline-flex items-center border border-slate-200 dark:border-slate-700 rounded-lg shrink-0">

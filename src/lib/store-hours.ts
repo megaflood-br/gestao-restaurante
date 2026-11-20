@@ -20,6 +20,54 @@ export const WEEKDAY_OPTIONS: Array<{
   { day: 6, short: 'Sáb', label: 'Sábado' },
 ];
 
+export const DISPLAY_WEEKDAY_ORDER: number[] = [1, 2, 3, 4, 5, 6, 0];
+
+export function normalizeMenuItemDays(days: unknown): number[] | undefined {
+  if (!Array.isArray(days)) return undefined;
+  const valid = [...new Set(days.map((d) => Number(d)))]
+    .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+    .sort((a, b) => a - b);
+  if (valid.length === 0 || valid.length === 7) {
+    return undefined;
+  }
+  return valid;
+}
+
+export function isMenuItemAvailableOnDay(
+  item: { availableDays?: number[] },
+  dayIndex: number,
+): boolean {
+  const normalized = normalizeMenuItemDays(item.availableDays);
+  if (!normalized) return true;
+  return normalized.includes(dayIndex);
+}
+
+export function formatMenuItemDaysLabel(days?: number[]): string {
+  const normalized = normalizeMenuItemDays(days);
+  if (!normalized) return 'Todos os dias';
+
+  const ordered = DISPLAY_WEEKDAY_ORDER.filter((d) => normalized.includes(d));
+  if (
+    ordered.length === 5 &&
+    ordered[0] === 1 &&
+    ordered[1] === 2 &&
+    ordered[2] === 3 &&
+    ordered[3] === 4 &&
+    ordered[4] === 5
+  ) {
+    return 'Seg a Sex';
+  }
+
+  return ordered
+    .map((d) => WEEKDAY_OPTIONS[d]?.short ?? '')
+    .filter(Boolean)
+    .join(', ');
+}
+
+export function getWeekdayLabel(dayIndex: number): string {
+  return WEEKDAY_OPTIONS[dayIndex]?.label ?? '';
+}
+
 export interface ParsedShiftMinutes {
   open: string;
   close: string;

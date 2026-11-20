@@ -268,6 +268,38 @@ export const INITIAL_DELIVERY_STATE: DeliveryStoreState = {
       ],
     },
     {
+      id: 'item-feijoada',
+      categoryId: 'cat-executivas',
+      name: 'Feijoada Tradicional da Casa',
+      description:
+        'Feijão preto cozido lentamente com carnes nobres suínas e bovinas, arroz branco soltinho, couve refogada na manteiga, farofa crocante, torresmo e laranja fatiada.',
+      price: 39.9,
+      image: '/images/dish_bife_acebolado_1794779706518.jpg',
+      available: true,
+      availableDays: [3, 6],
+      prepMinutes: 25,
+      serves: 'Serve 1 pessoa (650g)',
+      technicalSheet: [
+        { ingredientId: 'ing-feijao', quantity: 220, unit: 'g' },
+        { ingredientId: 'ing-arroz', quantity: 150, unit: 'g' },
+        { ingredientId: 'ing-laranja', quantity: 120, unit: 'g' },
+        { ingredientId: 'ing-embalagem', quantity: 1, unit: 'un' },
+      ],
+      addonGroups: [
+        {
+          id: 'grp-tam-feijoada',
+          title: 'Escolha o tamanho da porção',
+          required: true,
+          minSelect: 1,
+          maxSelect: 1,
+          options: [
+            { id: 'opt-feij-ind', name: 'Individual (650g)', price: 0, available: true },
+            { id: 'opt-feij-g', name: 'Completa p/ 2 pessoas (1,2kg)', price: 28.0, available: true },
+          ],
+        },
+      ],
+    },
+    {
       id: 'item-tropeiro',
       categoryId: 'cat-guarnicoes',
       name: 'Porção de Feijão Tropeiro (300g)',

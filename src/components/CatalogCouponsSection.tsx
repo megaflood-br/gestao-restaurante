@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import {
+  CalendarDays,
   Camera,
   CheckCircle2,
   PauseCircle,
@@ -17,6 +18,14 @@ import {
 import { formatCurrencyBRL } from '@/lib/formatters';
 import { calculateItemCmv } from '@/lib/stock-engine';
 import { readAndCompressImage } from '@/lib/image-upload';
+import {
+  DISPLAY_WEEKDAY_ORDER,
+  WEEKDAY_OPTIONS,
+  formatMenuItemDaysLabel,
+  getStoreAvailability,
+  isMenuItemAvailableOnDay,
+  normalizeMenuItemDays,
+} from '@/lib/store-hours';
 import type {
   AddonGroup,
   Coupon,
@@ -80,6 +89,7 @@ export function CatalogCouponsSection({
     mode === 'promocoes' ? 'cupons' : catalogTab;
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('todas');
+  const [dayFilter, setDayFilter] = useState<string>('todos');
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
   const [confirmDeleteItemId, setConfirmDeleteItemId] = useState<string | null>(null);
   const [confirmDeleteCouponId, setConfirmDeleteCouponId] = useState<string | null>(null);
@@ -98,6 +108,9 @@ export function CatalogCouponsSection({
   const [uploadingImg, setUploadingImg] = useState(false);
   const [imgUploadError, setImgUploadError] = useState('');
   const [itemAddonGroups, setItemAddonGroups] = useState<AddonGroup[]>([]);
+  const [itemScheduleMode, setItemScheduleMode] = useState<'todos' | 'especificos'>('todos');
+  const [itemAvailableDays, setItemAvailableDays] = useState<number[]>([]);
+  const [scheduleError, setScheduleError] = useState('');
   const [savingItem, setSavingItem] = useState(false);
 
   const [couponCode, setCouponCode] = useState('');
@@ -114,17 +127,30 @@ export function CatalogCouponsSection({
   const pausedCount = state.menuItems.length - availableCount;
   const activeCouponsCount = state.coupons.filter((c) => c.active).length;
 
+  const currentDayIndex = useMemo(
+    () => getStoreAvailability(state.store).currentDayIndex,
+    [state.store],
+  );
+
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
     return state.menuItems.filter((item) => {
       if (categoryFilter !== 'todas' && item.categoryId !== categoryFilter) return false;
+      if (dayFilter === 'hoje') {
+        if (!isMenuItemAvailableOnDay(item, currentDayIndex)) return false;
+      } else if (dayFilter === 'agendados') {
+        if (!normalizeMenuItemDays(item.availableDays)) return false;
+      } else if (dayFilter !== 'todos') {
+        const dayNum = Number(dayFilter);
+        if (!isMenuItemAvailableOnDay(item, dayNum)) return false;
+      }
       if (!q) return true;
       return (
         item.name.toLowerCase().includes(q) ||
         item.description.toLowerCase().includes(q)
       );
     });
-  }, [state.menuItems, categoryFilter, search]);
+  }, [state.menuItems, categoryFilter, dayFilter, currentDayIndex, search]);
 
   const openCreateModal = () => {
     setEditingItem(null);
@@ -139,6 +165,9 @@ export function CatalogCouponsSection({
     setPreviewImgError(false);
     setImgUploadError('');
     setItemAddonGroups([]);
+    setItemScheduleMode('todos');
+    setItemAvailableDays([]);
+    setScheduleError('');
     setItemModalOpen(true);
   };
 
@@ -155,7 +184,25 @@ export function CatalogCouponsSection({
     setPreviewImgError(false);
     setImgUploadError('');
     setItemAddonGroups(structuredClone(item.addonGroups));
+    const normalizedDays = normalizeMenuItemDays(item.availableDays);
+    if (normalizedDays) {
+      setItemScheduleMode('especificos');
+      setItemAvailableDays(normalizedDays);
+    } else {
+      setItemScheduleMode('todos');
+      setItemAvailableDays([]);
+    }
+    setScheduleError('');
     setItemModalOpen(true);
+  };
+
+  const handleToggleDishDay = (day: number) => {
+    setScheduleError('');
+    setItemAvailableDays((prev) => {
+      const exists = prev.includes(day);
+      const next = exists ? prev.filter((d) => d !== day) : [...prev, day];
+      return next.sort((a, b) => a - b);
+    });
   };
 
   const handleDishImageFileChange = async (
@@ -236,12 +283,23 @@ export function CatalogCouponsSection({
   const handleSaveMenuItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!itemName.trim()) return;
+    if (itemScheduleMode === 'especificos' && itemAvailableDays.length === 0) {
+      setScheduleError(
+        'Selecione pelo menos um dia da semana ou altere para "Todos os dias".',
+      );
+      return;
+    }
+
     setSavingItem(true);
 
     const parsedPrice = Math.max(0, Number(itemPrice) || 0);
     const parsedPromo = Number(itemPromoPrice);
     const promoPrice =
       parsedPromo > 0 && parsedPromo < parsedPrice ? parsedPromo : undefined;
+    const normalizedDays =
+      itemScheduleMode === 'todos'
+        ? undefined
+        : normalizeMenuItemDays(itemAvailableDays);
 
     const payload = {
       categoryId: itemCategory,
@@ -249,6 +307,7 @@ export function CatalogCouponsSection({
       description: itemDescription.trim(),
       price: parsedPrice,
       promoPrice,
+      availableDays: normalizedDays,
       prepMinutes: Math.max(1, Number(itemPrepMinutes) || 20),
       serves: itemServes.trim() || 'Serve 1 pessoa',
       image: itemImage.trim() || IMAGE_PRESETS[0].url,
@@ -269,7 +328,10 @@ export function CatalogCouponsSection({
           body: JSON.stringify({
             entity: 'menu_item',
             id: editingItem.id,
-            updates: payload,
+            updates: {
+              ...payload,
+              availableDays: normalizedDays ?? [],
+            },
           }),
         }).catch(() => {});
       } else {
@@ -509,6 +571,23 @@ export function CatalogCouponsSection({
                   </option>
                 ))}
               </select>
+              <select
+                value={dayFilter}
+                onChange={(e) => setDayFilter(e.target.value)}
+                aria-label="Filtrar por dia da semana"
+                className="px-3 py-2 text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg"
+              >
+                <option value="todos">Todos os dias da semana</option>
+                <option value="hoje">
+                  Disponíveis hoje ({WEEKDAY_OPTIONS[currentDayIndex]?.short})
+                </option>
+                <option value="agendados">Com dias específicos</option>
+                {DISPLAY_WEEKDAY_ORDER.map((dayNum) => (
+                  <option key={dayNum} value={String(dayNum)}>
+                    {WEEKDAY_OPTIONS[dayNum]?.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <button
@@ -528,6 +607,7 @@ export function CatalogCouponsSection({
                   <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-500 dark:text-slate-400">
                     <th className="py-3 px-5">Prato</th>
                     <th className="py-3 px-4">Categoria</th>
+                    <th className="py-3 px-4">Dias no Cardápio</th>
                     <th className="py-3 px-4">Preço</th>
                     <th className="py-3 px-4">Ficha / CMV</th>
                     <th className="py-3 px-4">Adicionais</th>
@@ -587,6 +667,35 @@ export function CatalogCouponsSection({
                         </td>
                         <td className="py-3 px-4 text-xs text-slate-600 dark:text-slate-300 whitespace-nowrap">
                           {cat?.name || 'Sem categoria'}
+                        </td>
+                        <td className="py-3 px-4 text-xs whitespace-nowrap">
+                          {(() => {
+                            const hasRestrictedDays = Boolean(
+                              normalizeMenuItemDays(item.availableDays),
+                            );
+                            const availableToday = isMenuItemAvailableOnDay(
+                              item,
+                              currentDayIndex,
+                            );
+                            return (
+                              <div>
+                                <p
+                                  className={
+                                    hasRestrictedDays
+                                      ? 'font-semibold text-brand-700 dark:text-brand-300'
+                                      : 'text-slate-500 dark:text-slate-400'
+                                  }
+                                >
+                                  {formatMenuItemDaysLabel(item.availableDays)}
+                                </p>
+                                {!availableToday && (
+                                  <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                                    Fora de hoje ({WEEKDAY_OPTIONS[currentDayIndex]?.short})
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="py-3 px-4 font-mono-tabular text-xs whitespace-nowrap">
                           {item.promoPrice ? (
@@ -1140,6 +1249,132 @@ export function CatalogCouponsSection({
                       className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg"
                     />
                   </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <CalendarDays
+                        className="w-4 h-4 text-brand-600 dark:text-brand-400 shrink-0"
+                        aria-hidden="true"
+                      />
+                      <div>
+                        <span className="block text-xs font-semibold text-slate-900 dark:text-white">
+                          Dias da Semana no Cardápio
+                        </span>
+                        <span className="block text-[11px] text-slate-500 dark:text-slate-400">
+                          Defina se o prato aparece sempre ou apenas em dias escolhidos (ex.: Feijoada na Qua e Sáb).
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="inline-flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg self-start sm:self-auto shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setItemScheduleMode('todos');
+                          setScheduleError('');
+                        }}
+                        className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                          itemScheduleMode === 'todos'
+                            ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        Todos os dias
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setItemScheduleMode('especificos');
+                          setScheduleError('');
+                        }}
+                        className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                          itemScheduleMode === 'especificos'
+                            ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        Dias específicos
+                      </button>
+                    </div>
+                  </div>
+
+                  {itemScheduleMode === 'especificos' && (
+                    <div className="p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg space-y-2.5">
+                      <div className="flex flex-wrap gap-1.5">
+                        {DISPLAY_WEEKDAY_ORDER.map((dayNum) => {
+                          const opt = WEEKDAY_OPTIONS[dayNum];
+                          const active = itemAvailableDays.includes(dayNum);
+                          return (
+                            <button
+                              key={dayNum}
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() => handleToggleDishDay(dayNum)}
+                              className={`px-3 py-1.5 text-xs font-semibold rounded-md border transition-colors whitespace-nowrap ${
+                                active
+                                  ? 'bg-brand-600 text-white border-brand-600'
+                                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-brand-400'
+                              }`}
+                            >
+                              {opt?.short}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                        <div className="flex flex-wrap items-center gap-2 text-slate-500 dark:text-slate-400">
+                          <span>Atalhos:</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setItemAvailableDays([3, 6]);
+                              setScheduleError('');
+                            }}
+                            className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                          >
+                            Qua e Sáb
+                          </button>
+                          <span aria-hidden="true">·</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setItemAvailableDays([1, 2, 3, 4, 5]);
+                              setScheduleError('');
+                            }}
+                            className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                          >
+                            Seg a Sex
+                          </button>
+                          <span aria-hidden="true">·</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setItemAvailableDays([0, 5, 6]);
+                              setScheduleError('');
+                            }}
+                            className="font-medium text-brand-600 dark:text-brand-400 hover:underline"
+                          >
+                            Sex, Sáb e Dom
+                          </button>
+                        </div>
+
+                        <span className="font-medium text-slate-700 dark:text-slate-300">
+                          {itemAvailableDays.length > 0
+                            ? `Visível: ${formatMenuItemDaysLabel(itemAvailableDays)}`
+                            : 'Nenhum dia marcado'}
+                        </span>
+                      </div>
+
+                      {scheduleError && (
+                        <p className="text-xs font-medium text-red-600 dark:text-red-400">
+                          {scheduleError}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-3">

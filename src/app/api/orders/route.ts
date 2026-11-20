@@ -15,7 +15,11 @@ import {
   upsertCustomerAndAwardOrderPoints,
 } from '@/lib/crm-engine';
 import { calculateDeliveryQuote } from '@/lib/delivery-pricing';
-import { getStoreAvailability } from '@/lib/store-hours';
+import {
+  formatMenuItemDaysLabel,
+  getStoreAvailability,
+  isMenuItemAvailableOnDay,
+} from '@/lib/store-hours';
 import { formatCurrencyBRL } from '@/lib/formatters';
 import {
   broadcastOrderEvent,
@@ -96,6 +100,21 @@ export async function POST(request: NextRequest) {
         { ok: false, error: 'Preencha nome, telefone e ao menos um item no pedido.' },
         { status: 400 },
       );
+    }
+
+    if (body.source !== 'balcao') {
+      for (const orderItem of body.items) {
+        const menuMatch = db.menuItems.find((m) => m.id === orderItem.menuItemId);
+        if (menuMatch && !isMenuItemAvailableOnDay(menuMatch, availability.currentDayIndex)) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: `O prato "${menuMatch.name}" está disponível apenas em: ${formatMenuItemDaysLabel(menuMatch.availableDays)}.`,
+            },
+            { status: 400 },
+          );
+        }
+      }
     }
 
     const subtotal = body.items.reduce((sum, item) => sum + item.totalPrice, 0);
