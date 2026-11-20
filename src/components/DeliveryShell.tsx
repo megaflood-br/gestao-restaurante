@@ -19,6 +19,7 @@ import {
   Sun,
   Tags,
   Trash2,
+  TrendingUp,
   Users,
   UtensilsCrossed,
   Wallet,
@@ -43,6 +44,7 @@ import { CatalogCouponsSection } from '@/components/CatalogCouponsSection';
 import { StockTechnicalSheetSection } from '@/components/StockTechnicalSheetSection';
 import { CouriersReportsSection } from '@/components/CouriersReportsSection';
 import { CostsFinanceSection } from '@/components/CostsFinanceSection';
+import { FinancialReportsSection } from '@/components/FinancialReportsSection';
 import { ChecklistsSection } from '@/components/ChecklistsSection';
 import {
   WasteControlSection,
@@ -126,6 +128,7 @@ const NAV_GROUPS: NavGroup[] = [
     groupLabel: 'Análise e Ajustes',
     items: [
       { id: 'desempenho', label: 'Desempenho', icon: BarChart3 },
+      { id: 'relatorios_financeiros', label: 'Relatórios Financeiros', icon: TrendingUp },
       { id: 'custos', label: 'Custos e Fluxo', icon: Wallet },
       { id: 'configuracoes', label: 'Configurações', icon: Settings },
     ],
@@ -203,7 +206,15 @@ export function DeliveryShell() {
                 ? parsed.stockMovements
                 : INITIAL_DELIVERY_STATE.stockMovements,
               financialEntries: Array.isArray(parsed.financialEntries)
-                ? parsed.financialEntries
+                ? (() => {
+                    const existingIds = new Set(parsed.financialEntries.map((f) => f.id));
+                    const missingSeedEntries = INITIAL_DELIVERY_STATE.financialEntries.filter(
+                      (f) => !existingIds.has(f.id),
+                    );
+                    return missingSeedEntries.length > 0
+                      ? [...parsed.financialEntries, ...missingSeedEntries]
+                      : parsed.financialEntries;
+                  })()
                 : INITIAL_DELIVERY_STATE.financialEntries,
               recurringExpenses: Array.isArray(parsed.recurringExpenses)
                 ? parsed.recurringExpenses
@@ -2008,6 +2019,12 @@ export function DeliveryShell() {
               onUpdateCourier={handleUpdateCourier}
               onUpdateOrderStatus={handleUpdateOrderStatus}
             />
+          ) : activeModule === 'relatorios_financeiros' ? (
+            <FinancialReportsSection
+              state={state}
+              onOpenCosts={() => setActiveModule('custos')}
+              onOpenOrders={() => setActiveModule('pedidos')}
+            />
           ) : activeModule === 'custos' ? (
             <CostsFinanceSection
               state={state}
@@ -2017,6 +2034,7 @@ export function DeliveryShell() {
               onUpdateRecurring={handleUpdateRecurringExpense}
               onDeleteRecurring={handleDeleteRecurringExpense}
               onLaunchRecurring={handleLaunchRecurringExpenses}
+              onOpenFinancialReports={() => setActiveModule('relatorios_financeiros')}
             />
           ) : (
             <SettingsSection

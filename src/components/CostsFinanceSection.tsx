@@ -41,6 +41,7 @@ interface CostsFinanceSectionProps {
     recurringId?: string;
     launchAllPending?: boolean;
   }) => Promise<void>;
+  onOpenFinancialReports?: () => void;
 }
 
 type FinanceTab = 'fluxo' | 'lancamentos' | 'recorrentes';
@@ -66,6 +67,7 @@ export function CostsFinanceSection({
   onUpdateRecurring,
   onDeleteRecurring,
   onLaunchRecurring,
+  onOpenFinancialReports,
 }: CostsFinanceSectionProps) {
   const [activeTab, setActiveTab] = useState<FinanceTab>('fluxo');
   const currentMonth = getCurrentMonthKey();
@@ -299,33 +301,45 @@ export function CostsFinanceSection({
           </p>
         </div>
 
-        <div
-          role="tablist"
-          aria-label="Seções financeiras"
-          className="inline-flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg self-start lg:self-auto overflow-x-auto max-w-full"
-        >
-          {(
-            [
-              { id: 'fluxo', label: 'Fluxo & Previsões' },
-              { id: 'lancamentos', label: 'Lançamentos Manuais' },
-              { id: 'recorrentes', label: 'Gastos Recorrentes' },
-            ] as const
-          ).map((tab) => (
+        <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto max-w-full">
+          {onOpenFinancialReports && (
             <button
-              key={tab.id}
               type="button"
-              role="tab"
-              aria-selected={activeTab === tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
-                activeTab === tab.id
-                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
+              onClick={onOpenFinancialReports}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-brand-700 dark:text-brand-300 bg-brand-50 dark:bg-brand-950/50 border border-brand-200 dark:border-brand-800 hover:bg-brand-100 dark:hover:bg-brand-900/50 rounded-lg whitespace-nowrap shrink-0 transition-colors"
             >
-              {tab.label}
+              <TrendingUp className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Relatórios Visuais</span>
             </button>
-          ))}
+          )}
+          <div
+            role="tablist"
+            aria-label="Seções financeiras"
+            className="inline-flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg overflow-x-auto max-w-full"
+          >
+            {(
+              [
+                { id: 'fluxo', label: 'Fluxo & Previsões' },
+                { id: 'lancamentos', label: 'Lançamentos Manuais' },
+                { id: 'recorrentes', label: 'Gastos Recorrentes' },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                  activeTab === tab.id
+                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

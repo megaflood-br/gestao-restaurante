@@ -12,6 +12,7 @@ export type DeliveryModuleId =
   | 'vitrine'
   | 'desempenho'
   | 'custos'
+  | 'relatorios_financeiros'
   | 'configuracoes';
 
 export type OrderStatus =
